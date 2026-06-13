@@ -189,18 +189,21 @@ const Index = () => {
                 </div>
               </CardHeader>
               <CardContent className="space-y-3">
-                {/* Radar */}
-                <div className="flex items-center justify-center">
-                <div className="scale-75 origin-center">
-                    <RadarDisplay
-                      isScanning={isScanning}
-                      detectedCount={imsiRecords.length}
-                      suspiciousCount={suspiciousCount}
-                    />
-                  </div>
+                {/* Radar — bigger and GPS-accurate */}
+                <div className="flex items-center justify-center pt-1 pb-2">
+                  <RadarDisplay isScanning={isScanning} targets={radarTargets} size={232} />
                 </div>
 
                 <div className="space-y-1.5 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Data source:</span>
+                    <Badge
+                      variant={towerSource === 'opencellid' ? 'default' : 'secondary'}
+                      className="text-[10px] h-5"
+                    >
+                      {towerSource === 'opencellid' ? 'Live · OpenCellID' : 'Simulated'}
+                    </Badge>
+                  </div>
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground">Frequency:</span>
                     <span className="font-mono text-foreground">{frequency}</span>
@@ -218,6 +221,7 @@ const Index = () => {
                     </span>
                   </div>
                 </div>
+
 
                 <Button
                   onClick={() => setIsScanning(!isScanning)}
