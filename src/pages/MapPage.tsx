@@ -18,12 +18,19 @@ import { cn } from '@/lib/utils';
 import { MapPin, Navigation, RefreshCw, Loader2, ChevronDown, Target, Satellite, AlertTriangle } from 'lucide-react';
 
 const MapPage = () => {
-  const [towers, setTowers] = useState<CellTower[]>([]);
+  const [extraTowers, setExtraTowers] = useState<CellTower[]>([]);
   const [selectedTower, setSelectedTower] = useState<CellTower | null>(null);
   const [isLookingUp, setIsLookingUp] = useState(false);
   const [operatorsOpen, setOperatorsOpen] = useState(false);
   const { latitude, longitude, loading: geoLoading, error: geoError, requestLocation, accuracy, hasRealLocation } = useGeolocation();
   const { country, countryName, loading: countryLoading } = useCountry(latitude, longitude);
+
+  // Real towers near the user from OpenCellID (with simulated fallback).
+  const { towers: liveTowers, source, loading: towersLoading, error: towersError, refetch } =
+    useOpenCellId(latitude, longitude, 4, country);
+
+  // Merge live towers with any manually triangulated lookups.
+  const towers = [...liveTowers, ...extraTowers];
 
   // Get map center based on user location
   const mapCenter: [number, number] = [
@@ -33,14 +40,6 @@ const MapPage = () => {
 
   // User location for marker
   const userLocation = latitude && longitude ? { lat: latitude, lng: longitude } : null;
-
-  // Generate towers around user location using the operators of that country
-  useEffect(() => {
-    if (latitude && longitude) {
-      setTowers(generateCellTowersAroundLocation(latitude, longitude, 15, country));
-    }
-  }, [latitude, longitude, country]);
-
 
   const handleTriangulation = async (data: {
     mcc: string;
@@ -68,20 +67,21 @@ const MapPage = () => {
       isSuspicious: false,
     };
     
-    setTowers(prev => [...prev, newTower]);
+    setExtraTowers(prev => [...prev, newTower]);
     setSelectedTower(newTower);
     setIsLookingUp(false);
   };
 
   const handleRefreshTowers = () => {
-    if (latitude && longitude) {
-      setTowers(generateCellTowersAroundLocation(latitude, longitude, 15, country));
-      setSelectedTower(null);
-    }
+    setExtraTowers([]);
+    setSelectedTower(null);
+    refetch();
   };
 
   const suspiciousTowers = towers.filter(t => t.isSuspicious);
   const verifiedTowers = towers.filter(t => !t.isSuspicious);
+
+
 
   return (
     <MainLayout>
