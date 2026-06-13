@@ -104,17 +104,36 @@ export const fetchTowersNear = async (
   }
 };
 
-/** Project towers into radar targets (bearing + distance) relative to the user. */
+/**
+ * Project towers into radar targets (bearing + distance) relative to the user.
+ * Real networks have many co-located sectors at the same coordinates, so we
+ * collapse near-identical positions and keep the closest targets for a clean,
+ * readable radar.
+ */
 export const toRadarTargets = (
   towers: CellTower[],
   userLat: number,
   userLng: number,
-): RadarTarget[] =>
-  towers.map((t) => ({
-    id: t.id,
-    bearing: bearingDegrees(userLat, userLng, t.lat, t.lng),
-    distance: haversineMeters(userLat, userLng, t.lat, t.lng),
-    suspicious: t.isSuspicious,
-    // -50 dBm (strong) -> 1, -110 dBm (weak) -> ~0
-    strength: Math.max(0.15, Math.min(1, (t.signalStrength + 110) / 60)),
-  }));
+): RadarTarget[] => {
+  const seen = new Set<string>();
+  const targets: RadarTarget[] = [];
+
+  for (const t of towers) {
+    const bearing = bearingDegrees(userLat, userLng, t.lat, t.lng);
+    const distance = haversineMeters(userLat, userLng, t.lat, t.lng);
+    // Collapse sectors within ~3° / ~60 m of each other into one blip.
+    const key = `${Math.round(bearing / 3)}-${Math.round(distance / 60)}-${t.isSuspicious ? 1 : 0}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    targets.push({
+      id: t.id,
+      bearing,
+      distance,
+      suspicious: t.isSuspicious,
+      strength: Math.max(0.15, Math.min(1, (t.signalStrength + 110) / 60)),
+    });
+  }
+
+  return targets.sort((a, b) => a.distance - b.distance).slice(0, 80);
+};
+
