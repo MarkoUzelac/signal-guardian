@@ -142,11 +142,34 @@ const MapPage = () => {
                 </Button>
               </div>
             </div>
+            <div className="flex flex-wrap items-center gap-2 mt-3">
+              <Badge
+                variant={source === 'opencellid' ? 'default' : 'secondary'}
+                className="flex items-center gap-1 h-6"
+              >
+                {towersLoading ? (
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                ) : (
+                  <Satellite className="w-3 h-3" />
+                )}
+                {source === 'opencellid' ? 'Live data · OpenCellID' : 'Simulated fallback'}
+              </Badge>
+              <span className="text-xs text-muted-foreground">
+                {towers.length} towers in range
+              </span>
+            </div>
             {geoError && (
               <p className="text-xs text-warning mt-2">⚠️ {geoError}</p>
             )}
+            {source !== 'opencellid' && towersError && (
+              <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+                <AlertTriangle className="w-3 h-3 shrink-0" />
+                Live tower data unavailable ({towersError}). Showing GPS-accurate simulation.
+              </p>
+            )}
           </CardContent>
         </Card>
+
 
         {/* Map - Full width, taller for better zoom exploration */}
         <div className="h-[350px] sm:h-[450px] lg:h-[550px]">
