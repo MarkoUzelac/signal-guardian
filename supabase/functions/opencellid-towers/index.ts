@@ -98,6 +98,7 @@ Deno.serve(async (req) => {
       );
     }
 
+    console.log('OpenCellID raw response:', text.slice(0, 500));
     const cells: any[] = Array.isArray(parsed?.cells) ? parsed.cells : [];
     const towers = cells
       .filter((c) => Number.isFinite(Number(c.lat)) && Number.isFinite(Number(c.lon)))
