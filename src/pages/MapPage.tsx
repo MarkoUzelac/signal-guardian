@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Header } from '@/components/layout/Header';
@@ -11,19 +11,26 @@ import { Button } from '@/components/ui/button';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { CellTower } from '@/types/signal';
-import { generateCellTowersAroundLocation } from '@/lib/mockData';
 import { useGeolocation } from '@/hooks/useGeolocation';
 import { useCountry } from '@/hooks/useCountry';
+import { useOpenCellId } from '@/hooks/useOpenCellId';
 import { cn } from '@/lib/utils';
-import { MapPin, Navigation, RefreshCw, Loader2, ChevronDown, Target } from 'lucide-react';
+import { MapPin, Navigation, RefreshCw, Loader2, ChevronDown, Target, Satellite, AlertTriangle } from 'lucide-react';
 
 const MapPage = () => {
-  const [towers, setTowers] = useState<CellTower[]>([]);
+  const [extraTowers, setExtraTowers] = useState<CellTower[]>([]);
   const [selectedTower, setSelectedTower] = useState<CellTower | null>(null);
   const [isLookingUp, setIsLookingUp] = useState(false);
   const [operatorsOpen, setOperatorsOpen] = useState(false);
   const { latitude, longitude, loading: geoLoading, error: geoError, requestLocation, accuracy, hasRealLocation } = useGeolocation();
   const { country, countryName, loading: countryLoading } = useCountry(latitude, longitude);
+
+  // Real towers near the user from OpenCellID (with simulated fallback).
+  const { towers: liveTowers, source, loading: towersLoading, error: towersError, refetch } =
+    useOpenCellId(latitude, longitude, 4, country);
+
+  // Merge live towers with any manually triangulated lookups.
+  const towers = [...liveTowers, ...extraTowers];
 
   // Get map center based on user location
   const mapCenter: [number, number] = [
@@ -33,14 +40,6 @@ const MapPage = () => {
 
   // User location for marker
   const userLocation = latitude && longitude ? { lat: latitude, lng: longitude } : null;
-
-  // Generate towers around user location using the operators of that country
-  useEffect(() => {
-    if (latitude && longitude) {
-      setTowers(generateCellTowersAroundLocation(latitude, longitude, 15, country));
-    }
-  }, [latitude, longitude, country]);
-
 
   const handleTriangulation = async (data: {
     mcc: string;
@@ -68,20 +67,21 @@ const MapPage = () => {
       isSuspicious: false,
     };
     
-    setTowers(prev => [...prev, newTower]);
+    setExtraTowers(prev => [...prev, newTower]);
     setSelectedTower(newTower);
     setIsLookingUp(false);
   };
 
   const handleRefreshTowers = () => {
-    if (latitude && longitude) {
-      setTowers(generateCellTowersAroundLocation(latitude, longitude, 15, country));
-      setSelectedTower(null);
-    }
+    setExtraTowers([]);
+    setSelectedTower(null);
+    refetch();
   };
 
   const suspiciousTowers = towers.filter(t => t.isSuspicious);
   const verifiedTowers = towers.filter(t => !t.isSuspicious);
+
+
 
   return (
     <MainLayout>
@@ -142,11 +142,34 @@ const MapPage = () => {
                 </Button>
               </div>
             </div>
+            <div className="flex flex-wrap items-center gap-2 mt-3">
+              <Badge
+                variant={source === 'opencellid' ? 'default' : 'secondary'}
+                className="flex items-center gap-1 h-6"
+              >
+                {towersLoading ? (
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                ) : (
+                  <Satellite className="w-3 h-3" />
+                )}
+                {source === 'opencellid' ? 'Live data · OpenCellID' : 'Simulated fallback'}
+              </Badge>
+              <span className="text-xs text-muted-foreground">
+                {towers.length} towers in range
+              </span>
+            </div>
             {geoError && (
               <p className="text-xs text-warning mt-2">⚠️ {geoError}</p>
             )}
+            {source !== 'opencellid' && towersError && (
+              <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+                <AlertTriangle className="w-3 h-3 shrink-0" />
+                Live tower data unavailable ({towersError}). Showing GPS-accurate simulation.
+              </p>
+            )}
           </CardContent>
         </Card>
+
 
         {/* Map - Full width, taller for better zoom exploration */}
         <div className="h-[350px] sm:h-[450px] lg:h-[550px]">

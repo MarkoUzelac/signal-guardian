@@ -15,6 +15,9 @@ import { IMSIRecord, Alert } from '@/types/signal';
 import { useAlertSound } from '@/hooks/useAlertSound';
 import { useGeolocation } from '@/hooks/useGeolocation';
 import { useCountry } from '@/hooks/useCountry';
+import { useOpenCellId } from '@/hooks/useOpenCellId';
+import { getSettings } from '@/hooks/useSettings';
+import { toRadarTargets } from '@/lib/openCellId';
 import { CROATIAN_FREQUENCY_BANDS } from '@/lib/croatianOperators';
 import { cn } from '@/lib/utils';
 import {
@@ -34,6 +37,15 @@ const Index = () => {
   const { hasRealLocation, latitude, longitude } = useGeolocation();
   const { country } = useCountry(latitude, longitude);
 
+  // Real towers near the user (OpenCellID) projected onto the tactical radar.
+  const { towers: realTowers, source: towerSource } = useOpenCellId(latitude, longitude, 3, country);
+  const radarTargets =
+    latitude !== null && longitude !== null
+      ? toRadarTargets(realTowers, latitude, longitude)
+      : [];
+
+
+
   // Initialize with mock data based on the user's country operators
   useEffect(() => {
     setImsiRecords(generateMockIMSIRecords(15, country));
@@ -48,15 +60,41 @@ const Index = () => {
       (record) => {
         setImsiRecords(prev => [record, ...prev].slice(0, 50));
       },
-      () => {},
+      (record) => {
+        // Silent SMS Protection: flag suspected Type-0 (silent) SMS activity.
+        const s = getSettings();
+        if (
+          record.alertType === 'SILENT_SMS' &&
+          s.silentSmsDetection &&
+          s.silentSmsAlerts &&
+          s.alertsEnabled
+        ) {
+          setAlerts(prev => [
+            {
+              id: `silent-sms-${record.id}`,
+              type: 'warning' as const,
+              title: 'Silent SMS Detected',
+              message: `Possible Type-0 (silent) SMS targeting ${record.operator}. Silent SMS is used to locate a device without notifying the user. See the Protection Guide to block it.`,
+              timestamp: new Date(),
+              acknowledged: false,
+              source: 'Silent SMS Monitor',
+            },
+            ...prev,
+          ]);
+          if (s.soundAlerts) playSound('warning');
+        }
+      },
       country
     );
 
     const unsubAlert = simulateRealtimeAlert(
       (alert) => {
-        setAlerts(prev => [alert, ...prev]);
+        if (getSettings().alertsEnabled) {
+          setAlerts(prev => [alert, ...prev]);
+        }
       },
       (type) => {
+        if (!getSettings().soundAlerts) return;
         if (type === 'critical') {
           playSound('critical');
         } else if (type === 'warning') {
@@ -70,6 +108,7 @@ const Index = () => {
       unsubAlert();
     };
   }, [isScanning, playSound, country]);
+
 
   const handleAcknowledgeAlert = (id: string) => {
     setAlerts(prev =>
@@ -178,18 +217,21 @@ const Index = () => {
                 </div>
               </CardHeader>
               <CardContent className="space-y-3">
-                {/* Radar */}
-                <div className="flex items-center justify-center">
-                <div className="scale-75 origin-center">
-                    <RadarDisplay
-                      isScanning={isScanning}
-                      detectedCount={imsiRecords.length}
-                      suspiciousCount={suspiciousCount}
-                    />
-                  </div>
+                {/* Radar — bigger and GPS-accurate */}
+                <div className="flex items-center justify-center pt-1 pb-2">
+                  <RadarDisplay isScanning={isScanning} targets={radarTargets} size={232} />
                 </div>
 
                 <div className="space-y-1.5 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Data source:</span>
+                    <Badge
+                      variant={towerSource === 'opencellid' ? 'default' : 'secondary'}
+                      className="text-[10px] h-5"
+                    >
+                      {towerSource === 'opencellid' ? 'Live · OpenCellID' : 'Simulated'}
+                    </Badge>
+                  </div>
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground">Frequency:</span>
                     <span className="font-mono text-foreground">{frequency}</span>
@@ -207,6 +249,7 @@ const Index = () => {
                     </span>
                   </div>
                 </div>
+
 
                 <Button
                   onClick={() => setIsScanning(!isScanning)}

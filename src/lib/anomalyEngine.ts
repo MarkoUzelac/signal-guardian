@@ -68,13 +68,25 @@ const NORMAL_SIGNAL_MIN = -110;
 const NORMAL_SIGNAL_MAX = -50;
 const SUSPICIOUS_SIGNAL_THRESHOLD = -30; // Too strong = likely rogue
 
-// Geo boundaries for Croatia (approximate bounding box)
-const CROATIA_BOUNDS = {
-  minLat: 42.3,
-  maxLat: 46.6,
-  minLng: 13.4,
-  maxLng: 19.5,
-};
+// Expected operating region, centred on the user. Updated at runtime via
+// setKnownRegion() so "out of region" reflects wherever the user actually is.
+let EXPECTED_REGION: { lat: number; lng: number; radiusKm: number } | null = null;
+
+/** Define the geographic area towers are expected to fall within. */
+export function setKnownRegion(lat: number, lng: number, radiusKm: number) {
+  EXPECTED_REGION = { lat, lng, radiusKm };
+}
+
+// Great-circle distance in km (lightweight, local copy to avoid imports).
+function distanceKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * 6371 * Math.asin(Math.min(1, Math.sqrt(a)));
+}
 
 // ─── Scoring Functions ───────────────────────────────────────────────────────
 
@@ -118,14 +130,15 @@ function scoreDowngrade(technology: CellTower['technology'], signalStrength: num
 }
 
 function scoreGeoMismatch(tower: CellTower): { score: number; detail?: string } {
-  const inBounds =
-    tower.lat >= CROATIA_BOUNDS.minLat &&
-    tower.lat <= CROATIA_BOUNDS.maxLat &&
-    tower.lng >= CROATIA_BOUNDS.minLng &&
-    tower.lng <= CROATIA_BOUNDS.maxLng;
+  // No region set yet -> can't judge geography, treat as clean.
+  if (!EXPECTED_REGION) return { score: 0 };
 
-  if (!inBounds) {
-    return { score: 1.0, detail: `Tower at ${tower.lat.toFixed(4)}, ${tower.lng.toFixed(4)} is outside expected operator region` };
+  const dist = distanceKm(EXPECTED_REGION.lat, EXPECTED_REGION.lng, tower.lat, tower.lng);
+  if (dist > EXPECTED_REGION.radiusKm) {
+    return {
+      score: 1.0,
+      detail: `Tower ${dist.toFixed(1)} km away is outside the expected operating region`,
+    };
   }
   return { score: 0 };
 }
