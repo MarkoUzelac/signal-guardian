@@ -85,17 +85,21 @@ const GUIDE_SECTIONS: GuideSection[] = [
       'Increased battery drain during idle periods',
     ],
     protection: [
-      'Use SnoopSnitch or similar apps to detect Type 0 SMS',
-      'Monitor baseband activity for unexplained network registrations',
-      'Use airplane mode when not actively using cellular service',
-      'Consider using a phone with baseband firewall capability',
-      'Use VoIP/WiFi calling instead of cellular when possible',
+      'BLOCK: Disable 2G entirely (Android: Settings → Network & Internet → SIMs → Allowed network types → exclude 2G). Silent SMS tracking relies heavily on 2G.',
+      'BLOCK: Enable airplane mode when idle, or remove the SIM in high-risk situations so no Type-0 SMS can reach the baseband',
+      'BLOCK: Use a phone with a baseband firewall (e.g. GrapheneOS / CalyxOS) to reject silent SMS at the modem level',
+      'BLOCK: Switch sensitive comms to WiFi/VoIP + VPN so your cellular presence reveals less',
+      'DETECT: Install SnoopSnitch (rooted Android) to log and count incoming Type-0 SMS',
+      'DETECT: Watch for the warning signs above and keep this app\'s alerts enabled',
+      'RESPOND: If you see repeated silent SMS, document timestamps and report to your telecom regulator / police',
     ],
     tools: [
-      'SnoopSnitch — detects silent SMS on rooted Android devices',
+      'SnoopSnitch — detects and counts silent SMS on rooted Android devices',
+      'GrapheneOS / CalyxOS — hardened Android with baseband protections',
       'Android HiddenMenu (*#*#4636#*#*) — view phone radio information',
       'Network Signal Info Pro — detailed cell tower monitoring',
     ],
+
   },
   {
     id: 'location-tracking',
