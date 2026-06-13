@@ -59,15 +59,41 @@ const Index = () => {
       (record) => {
         setImsiRecords(prev => [record, ...prev].slice(0, 50));
       },
-      () => {},
+      (record) => {
+        // Silent SMS Protection: flag suspected Type-0 (silent) SMS activity.
+        const s = getSettings();
+        if (
+          record.alertType === 'SILENT_SMS' &&
+          s.silentSmsDetection &&
+          s.silentSmsAlerts &&
+          s.alertsEnabled
+        ) {
+          setAlerts(prev => [
+            {
+              id: `silent-sms-${record.id}`,
+              type: 'warning' as const,
+              title: 'Silent SMS Detected',
+              message: `Possible Type-0 (silent) SMS targeting ${record.operator}. Silent SMS is used to locate a device without notifying the user. See the Protection Guide to block it.`,
+              timestamp: new Date(),
+              acknowledged: false,
+              source: 'Silent SMS Monitor',
+            },
+            ...prev,
+          ]);
+          if (s.soundAlerts) playSound('warning');
+        }
+      },
       country
     );
 
     const unsubAlert = simulateRealtimeAlert(
       (alert) => {
-        setAlerts(prev => [alert, ...prev]);
+        if (getSettings().alertsEnabled) {
+          setAlerts(prev => [alert, ...prev]);
+        }
       },
       (type) => {
+        if (!getSettings().soundAlerts) return;
         if (type === 'critical') {
           playSound('critical');
         } else if (type === 'warning') {
@@ -81,6 +107,7 @@ const Index = () => {
       unsubAlert();
     };
   }, [isScanning, playSound, country]);
+
 
   const handleAcknowledgeAlert = (id: string) => {
     setAlerts(prev =>
