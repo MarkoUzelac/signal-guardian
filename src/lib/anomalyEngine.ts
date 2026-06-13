@@ -130,14 +130,15 @@ function scoreDowngrade(technology: CellTower['technology'], signalStrength: num
 }
 
 function scoreGeoMismatch(tower: CellTower): { score: number; detail?: string } {
-  const inBounds =
-    tower.lat >= CROATIA_BOUNDS.minLat &&
-    tower.lat <= CROATIA_BOUNDS.maxLat &&
-    tower.lng >= CROATIA_BOUNDS.minLng &&
-    tower.lng <= CROATIA_BOUNDS.maxLng;
+  // No region set yet -> can't judge geography, treat as clean.
+  if (!EXPECTED_REGION) return { score: 0 };
 
-  if (!inBounds) {
-    return { score: 1.0, detail: `Tower at ${tower.lat.toFixed(4)}, ${tower.lng.toFixed(4)} is outside expected operator region` };
+  const dist = distanceKm(EXPECTED_REGION.lat, EXPECTED_REGION.lng, tower.lat, tower.lng);
+  if (dist > EXPECTED_REGION.radiusKm) {
+    return {
+      score: 1.0,
+      detail: `Tower ${dist.toFixed(1)} km away is outside the expected operating region`,
+    };
   }
   return { score: 0 };
 }
