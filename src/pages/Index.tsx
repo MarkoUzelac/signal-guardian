@@ -16,6 +16,7 @@ import { useAlertSound } from '@/hooks/useAlertSound';
 import { useGeolocation } from '@/hooks/useGeolocation';
 import { useCountry } from '@/hooks/useCountry';
 import { useOpenCellId } from '@/hooks/useOpenCellId';
+import { getSettings } from '@/hooks/useSettings';
 import { toRadarTargets } from '@/lib/openCellId';
 import { CROATIAN_FREQUENCY_BANDS } from '@/lib/croatianOperators';
 import { cn } from '@/lib/utils';
