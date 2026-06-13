@@ -36,6 +36,15 @@ const Index = () => {
   const { hasRealLocation, latitude, longitude } = useGeolocation();
   const { country } = useCountry(latitude, longitude);
 
+  // Real towers near the user (OpenCellID) projected onto the tactical radar.
+  const { towers: realTowers, source: towerSource } = useOpenCellId(latitude, longitude, 3, country);
+  const radarTargets =
+    latitude !== null && longitude !== null
+      ? toRadarTargets(realTowers, latitude, longitude)
+      : [];
+
+
+
   // Initialize with mock data based on the user's country operators
   useEffect(() => {
     setImsiRecords(generateMockIMSIRecords(15, country));
