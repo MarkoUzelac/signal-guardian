@@ -11,11 +11,11 @@ import { Button } from '@/components/ui/button';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { CellTower } from '@/types/signal';
-import { generateCellTowersAroundLocation } from '@/lib/mockData';
 import { useGeolocation } from '@/hooks/useGeolocation';
 import { useCountry } from '@/hooks/useCountry';
+import { useOpenCellId } from '@/hooks/useOpenCellId';
 import { cn } from '@/lib/utils';
-import { MapPin, Navigation, RefreshCw, Loader2, ChevronDown, Target } from 'lucide-react';
+import { MapPin, Navigation, RefreshCw, Loader2, ChevronDown, Target, Satellite, AlertTriangle } from 'lucide-react';
 
 const MapPage = () => {
   const [towers, setTowers] = useState<CellTower[]>([]);
