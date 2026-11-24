@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Header } from '@/components/layout/Header';
@@ -11,7 +11,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import {
-  generateTacticalTowers,
   computeTacticalStats,
   THREAT_BG_CLASSES,
   THREAT_COLORS,
@@ -19,8 +18,6 @@ import {
   type TacticalStats,
   type ThreatLevel,
 } from '@/lib/anomalyEngine';
-import { useGeolocation } from '@/hooks/useGeolocation';
-import { useCountry } from '@/hooks/useCountry';
 import {
   Shield,
   AlertTriangle,
@@ -50,22 +47,13 @@ import {
   Pie,
   Cell,
 } from 'recharts';
+import { toast } from 'sonner';
 
 const TacticalDashboard = () => {
-  const [towers, setTowers] = useState<TacticalTower[]>([]);
+  const towers: TacticalTower[] = [];
   const [selectedThreatLevel, setSelectedThreatLevel] = useState<string>('all');
   const [selectedTower, setSelectedTower] = useState<TacticalTower | null>(null);
-  const [isScanning, setIsScanning] = useState(true);
-  const { latitude, longitude } = useGeolocation();
-  const { country } = useCountry(latitude, longitude);
-
-  const lat = latitude || 45.815;
-  const lng = longitude || 15.9819;
-
-  useEffect(() => {
-    setTowers(generateTacticalTowers(lat, lng, 60, undefined, country));
-  }, [lat, lng, country]);
-
+  const isScanning = false;
   const stats = useMemo(() => computeTacticalStats(towers), [towers]);
 
   const filteredTowers = useMemo(() => {
@@ -79,11 +67,15 @@ const TacticalDashboard = () => {
   );
 
   const handleRefresh = () => {
-    setTowers(generateTacticalTowers(lat, lng, 60, undefined, country));
     setSelectedTower(null);
+    toast.info('No cellular telemetry source is connected. The tactical scan cannot run.');
   };
 
   const handleExport = () => {
+    if (towers.length === 0) {
+      toast.info('No verified cell records are available to export.');
+      return;
+    }
     const data = towers.map(t => ({
       id: t.id,
       operator: t.operator,
@@ -135,47 +127,62 @@ const TacticalDashboard = () => {
       />
 
       <div className="p-3 md:p-6 space-y-4">
-        {/* ─── Threat Level Overview ────────────────────────────── */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-          <ThreatStatCard
-            label="Total Towers"
-            value={stats.total}
-            icon={<Radio className="w-4 h-4" />}
-            variant="default"
-          />
-          <ThreatStatCard
-            label="Critical"
-            value={stats.critical}
-            icon={<Zap className="w-4 h-4" />}
-            variant="critical"
-            pulse={stats.critical > 0}
-          />
-          <ThreatStatCard
-            label="High Risk"
-            value={stats.high}
-            icon={<AlertTriangle className="w-4 h-4" />}
-            variant="high"
-          />
-          <ThreatStatCard
-            label="Medium"
-            value={stats.medium}
-            icon={<Target className="w-4 h-4" />}
-            variant="medium"
-          />
-          <ThreatStatCard
-            label="Low"
-            value={stats.low}
-            icon={<Shield className="w-4 h-4" />}
-            variant="low"
-          />
-          <ThreatStatCard
-            label="Clean"
-            value={stats.clean}
-            icon={<Activity className="w-4 h-4" />}
-            variant="clean"
-          />
-        </div>
-
+        {towers.length === 0 ? (
+          <Card className="border-warning/40 bg-warning/5">
+            <CardContent className="p-4 flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-warning shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-semibold">Cellular telemetry is not connected</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  No tower records are available. Tactical threat scoring, clean/unsafe counts and live monitoring are not running. The device must provide real MCC/MNC, LAC, Cell ID, radio technology, signal strength and timestamp data before analysis can begin.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        ) : (
+          <>
+          {/* ─── Threat Level Overview ────────────────────────────── */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            <ThreatStatCard
+              label="Total Towers"
+              value={stats.total}
+              icon={<Radio className="w-4 h-4" />}
+              variant="default"
+            />
+            <ThreatStatCard
+              label="Critical"
+              value={stats.critical}
+              icon={<Zap className="w-4 h-4" />}
+              variant="critical"
+              pulse={stats.critical > 0}
+            />
+            <ThreatStatCard
+              label="High Risk"
+              value={stats.high}
+              icon={<AlertTriangle className="w-4 h-4" />}
+              variant="high"
+            />
+            <ThreatStatCard
+              label="Medium"
+              value={stats.medium}
+              icon={<Target className="w-4 h-4" />}
+              variant="medium"
+            />
+            <ThreatStatCard
+              label="Low"
+              value={stats.low}
+              icon={<Shield className="w-4 h-4" />}
+              variant="low"
+            />
+            <ThreatStatCard
+              label="Clean"
+              value={stats.clean}
+              icon={<Activity className="w-4 h-4" />}
+              variant="clean"
+            />
+          </div>
+          </>
+        )}
         {/* ─── Avg Score Bar ───────────────────────────────────── */}
         <Card className="bg-card/50 border-border">
           <CardContent className="p-4">
@@ -184,14 +191,14 @@ const TacticalDashboard = () => {
                 <Radar className="w-4 h-4 text-primary" />
                 <span className="text-sm font-medium">Overall Threat Index</span>
               </div>
-              <span className="text-sm font-mono font-bold">{(stats.avgScore * 100).toFixed(1)}%</span>
+              <span className="text-sm font-mono font-bold">{towers.length === 0 ? 'Unavailable' : `${(stats.avgScore * 100).toFixed(1)}%`}</span>
             </div>
             <Progress
               value={stats.avgScore * 100}
               className="h-2"
             />
             <div className="flex justify-between mt-1">
-              <span className="text-xs text-muted-foreground">0% Clean</span>
+              <span className="text-xs text-muted-foreground">{towers.length === 0 ? 'No data' : '0% heuristic flags'}</span>
               <span className="text-xs text-muted-foreground">100% Critical</span>
             </div>
           </CardContent>
@@ -199,7 +206,7 @@ const TacticalDashboard = () => {
 
         {/* ─── Controls ────────────────────────────────────────── */}
         <div className="flex flex-wrap items-center gap-3">
-          <Select value={selectedThreatLevel} onValueChange={setSelectedThreatLevel}>
+          <Select value={selectedThreatLevel} onValueChange={setSelectedThreatLevel} disabled={towers.length === 0}>
             <SelectTrigger className="w-[160px]">
               <SelectValue placeholder="Filter level" />
             </SelectTrigger>
@@ -209,21 +216,21 @@ const TacticalDashboard = () => {
               <SelectItem value="HIGH">🟠 High</SelectItem>
               <SelectItem value="MEDIUM">🟡 Medium</SelectItem>
               <SelectItem value="LOW">🟢 Low</SelectItem>
-              <SelectItem value="CLEAN">✅ Clean</SelectItem>
+              <SelectItem value="CLEAN">No heuristic flags</SelectItem>
             </SelectContent>
           </Select>
-          <Button variant="outline" size="sm" onClick={handleRefresh}>
+          <Button variant="outline" size="sm" onClick={handleRefresh} disabled={towers.length === 0}>
             <RefreshCw className="w-4 h-4 mr-2" />
-            Re-scan
+            Refresh telemetry
           </Button>
-          <Button variant="outline" size="sm" onClick={handleExport}>
+          <Button variant="outline" size="sm" onClick={handleExport} disabled={towers.length === 0}>
             <Download className="w-4 h-4 mr-2" />
             Export CSV
           </Button>
           <div className="ml-auto flex items-center gap-2">
-            <span className={cn("w-2 h-2 rounded-full", isScanning ? "bg-success status-active" : "bg-muted")} />
+            <span className="w-2 h-2 rounded-full bg-warning" />
             <span className="text-xs text-muted-foreground">
-              {isScanning ? 'Live Monitoring' : 'Paused'}
+              Telemetry disconnected
             </span>
           </div>
         </div>
@@ -236,11 +243,16 @@ const TacticalDashboard = () => {
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium flex items-center gap-2">
                   <Crosshair className="w-4 h-4 text-primary" />
-                  Anomaly Feed ({sortedByScore.length})
+                  {towers.length === 0 ? 'Anomaly Feed — no data source' : `Anomaly Feed (${sortedByScore.length})`}
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-0">
                 <ScrollArea className="h-[500px]">
+                  {towers.length === 0 ? (
+                    <div className="p-6 text-center text-sm text-muted-foreground">
+                      No live cell records. Threat analysis was not performed.
+                    </div>
+                  ) : (
                   <div className="divide-y divide-border">
                     <AnimatePresence>
                       {sortedByScore.map((tower, i) => (
@@ -254,6 +266,7 @@ const TacticalDashboard = () => {
                       ))}
                     </AnimatePresence>
                   </div>
+                  )}
                 </ScrollArea>
               </CardContent>
             </Card>
@@ -268,7 +281,7 @@ const TacticalDashboard = () => {
               <Card className="bg-card border-border">
                 <CardContent className="p-8 text-center">
                   <Eye className="w-8 h-8 mx-auto mb-2 text-muted-foreground opacity-50" />
-                  <p className="text-sm text-muted-foreground">Select a tower to inspect</p>
+                  <p className="text-sm text-muted-foreground">No cell records are available to inspect.</p>
                 </CardContent>
               </Card>
             )}

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Header } from '@/components/layout/Header';
@@ -11,16 +11,16 @@ import { Button } from '@/components/ui/button';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { CellTower } from '@/types/signal';
-import { generateCellTowersAroundLocation } from '@/lib/mockData';
 import { useGeolocation } from '@/hooks/useGeolocation';
 import { useCountry } from '@/hooks/useCountry';
 import { cn } from '@/lib/utils';
-import { MapPin, Navigation, RefreshCw, Loader2, ChevronDown, Target } from 'lucide-react';
+import { MapPin, Navigation, RefreshCw, Loader2, ChevronDown, Target, AlertTriangle } from 'lucide-react';
+import { toast } from 'sonner';
 
 const MapPage = () => {
-  const [towers, setTowers] = useState<CellTower[]>([]);
+  const towers: CellTower[] = [];
   const [selectedTower, setSelectedTower] = useState<CellTower | null>(null);
-  const [isLookingUp, setIsLookingUp] = useState(false);
+  const isLookingUp = false;
   const [operatorsOpen, setOperatorsOpen] = useState(false);
   const { latitude, longitude, loading: geoLoading, error: geoError, requestLocation, accuracy, hasRealLocation } = useGeolocation();
   const { country, countryName, loading: countryLoading } = useCountry(latitude, longitude);
@@ -34,60 +34,28 @@ const MapPage = () => {
   // User location for marker
   const userLocation = latitude && longitude ? { lat: latitude, lng: longitude } : null;
 
-  // Generate towers around user location using the operators of that country
-  useEffect(() => {
-    if (latitude && longitude) {
-      setTowers(generateCellTowersAroundLocation(latitude, longitude, 15, country));
-    }
-  }, [latitude, longitude, country]);
-
-
-  const handleTriangulation = async (data: {
+  // Geolocation is not cellular telemetry. Never synthesize cell IDs or tower coordinates.
+  const handleTriangulation = (_data: {
     mcc: string;
     mnc: string;
     lac: string;
     cellId: string;
   }) => {
-    setIsLookingUp(true);
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    
-    const operator = country.operators.find(op => op.mnc === data.mnc) || country.operators[0];
-    
-    const newTower: CellTower = {
-      id: `tower-lookup-${Date.now()}`,
-      mcc: data.mcc || country.mcc,
-      mnc: data.mnc || operator.mnc,
-      lac: data.lac || '12345',
-      cellId: data.cellId || '67890',
-      lat: (latitude || 45.8150) + (Math.random() - 0.5) * 0.02,
-      lng: (longitude || 15.9819) + (Math.random() - 0.5) * 0.02,
-      signalStrength: -70,
-      operator: operator.name,
-      technology: '4G',
-      lastSeen: new Date(),
-      isSuspicious: false,
-    };
-    
-    setTowers(prev => [...prev, newTower]);
-    setSelectedTower(newTower);
-    setIsLookingUp(false);
+    toast.error('Cell tower lookup unavailable', {
+      description: 'No authenticated OpenCellID provider or native Android radio feed is configured. No tower position has been estimated.',
+    });
   };
 
   const handleRefreshTowers = () => {
-    if (latitude && longitude) {
-      setTowers(generateCellTowersAroundLocation(latitude, longitude, 15, country));
-      setSelectedTower(null);
-    }
+    setSelectedTower(null);
+    toast.info('No live cell-tower feed is connected. The map has no verified tower records to refresh.');
   };
-
-  const suspiciousTowers = towers.filter(t => t.isSuspicious);
-  const verifiedTowers = towers.filter(t => !t.isSuspicious);
 
   return (
     <MainLayout>
       <Header
         title="Cell Tower Map"
-        subtitle="Real-time tower mapping near your location"
+        subtitle="GPS map preview — cellular tower telemetry is not connected"
       />
 
       <div className="p-3 md:p-6 space-y-4">
@@ -148,6 +116,18 @@ const MapPage = () => {
           </CardContent>
         </Card>
 
+        <Card className="border-warning/40 bg-warning/5">
+          <CardContent className="p-4 flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-warning shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-semibold">Live cell-tower data unavailable</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Browser GPS can provide device coordinates but cannot read cellular MCC/MNC, LAC, Cell ID, radio technology or signal strength. No synthetic towers are displayed. Connect the native Android telemetry collector or an authenticated provider to enable cell records.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+
         {/* Map - Full width, taller for better zoom exploration */}
         <div className="h-[350px] sm:h-[450px] lg:h-[550px]">
           <ErrorBoundary>
@@ -173,26 +153,16 @@ const MapPage = () => {
             onTowerSelect={setSelectedTower}
             onRefresh={handleRefreshTowers}
           />
-          {/* Tower Stats */}
-          <Card className="bg-card border-border">
+          {/* No numeric tower/security statistics are shown until a real feed exists. */}
+          <Card className="border-warning/40 bg-warning/5">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">Detected Towers</CardTitle>
+              <CardTitle className="text-sm font-medium">Cellular Data Status</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="flex items-center justify-between gap-4">
-                <div className="text-center flex-1">
-                  <p className="text-2xl font-bold">{towers.length}</p>
-                  <p className="text-xs text-muted-foreground">Total</p>
-                </div>
-                <div className="text-center flex-1">
-                  <p className="text-2xl font-bold text-success">{verifiedTowers.length}</p>
-                  <p className="text-xs text-muted-foreground">Verified</p>
-                </div>
-                <div className="text-center flex-1">
-                  <p className="text-2xl font-bold text-destructive">{suspiciousTowers.length}</p>
-                  <p className="text-xs text-muted-foreground">Suspicious</p>
-                </div>
-              </div>
+              <p className="text-sm font-semibold">Not connected</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Tower count, verification and threat status are unavailable. No assessment has been performed.
+              </p>
             </CardContent>
           </Card>
 
@@ -249,10 +219,10 @@ const MapPage = () => {
                     <span
                       className={cn(
                         'w-2 h-2 rounded-full',
-                        selectedTower.isSuspicious ? 'bg-destructive' : 'bg-success'
+                        selectedTower.isSuspicious ? 'bg-destructive' : 'bg-warning'
                       )}
                     />
-                    {selectedTower.isSuspicious ? 'Suspicious Tower' : 'Verified Tower'}
+                    {selectedTower.isSuspicious ? 'Suspicious Cell Record' : 'Unverified Cell Record'}
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-1 text-xs">
@@ -288,7 +258,7 @@ const MapPage = () => {
             <Card className="bg-card border-border">
               <CardContent className="p-6 text-center text-muted-foreground">
                 <MapPin className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                <p className="text-sm">Tap a tower on the map to view details</p>
+                <p className="text-sm">No cell records are available because a live telemetry source is not connected.</p>
               </CardContent>
             </Card>
           )}

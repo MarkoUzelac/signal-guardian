@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { MetadataResult } from '@/types/signal';
-import { generateMockMetadata } from '@/lib/mockData';
+import exifr from 'exifr';
 import { cn } from '@/lib/utils';
 
 export const MetadataAnalyzer = () => {
@@ -13,6 +13,7 @@ export const MetadataAnalyzer = () => {
   const [file, setFile] = useState<File | null>(null);
   const [result, setResult] = useState<MetadataResult | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -24,43 +25,142 @@ export const MetadataAnalyzer = () => {
     setIsDragging(false);
   }, []);
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
+  const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
     const droppedFile = e.dataTransfer.files[0];
     if (droppedFile) {
-      processFile(droppedFile);
+      void processFile(droppedFile);
     }
-  }, []);
+  };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (selectedFile) {
-      processFile(selectedFile);
+      void processFile(selectedFile);
     }
+    e.target.value = '';
   };
 
   const processFile = async (selectedFile: File) => {
+    const supportedImage = selectedFile.type.startsWith('image/') ||
+      /\\.(jpe?g|tiff?|heic|avif|png)$/i.test(selectedFile.name);
+
+    if (!supportedImage) {
+      setAnalysisError('Unsupported format. Select a JPEG, PNG, TIFF, HEIC or AVIF image.');
+      setFile(null);
+      setResult(null);
+      return;
+    }
+
+    if (selectedFile.size > 64 * 1024 * 1024) {
+      setAnalysisError('File exceeds the 64 MB client-side processing limit.');
+      setFile(null);
+      setResult(null);
+      return;
+    }
+
     setFile(selectedFile);
     setIsAnalyzing(true);
+    setAnalysisError(null);
     setResult(null);
 
-    // Simulate analysis delay
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    try {
+      const parsed = await exifr.parse(selectedFile, true) as Record<string, unknown> | undefined;
+      const gps = await exifr.gps(selectedFile);
 
-    // Generate mock result (in real app, would call backend API with ExifTool)
-    const mockResult = generateMockMetadata();
-    mockResult.filename = selectedFile.name;
-    mockResult.fileSize = selectedFile.size;
-    mockResult.fileType = selectedFile.type;
+      const tagLabels: Record<string, string> = {
+        Make: 'Camera Make',
+        Model: 'Camera Model',
+        Software: 'Software',
+        DateTimeOriginal: 'Capture Time',
+        CreateDate: 'Creation Time',
+        ModifyDate: 'Modification Time',
+        ExposureTime: 'Exposure Time',
+        FNumber: 'F-Number',
+        ISO: 'ISO',
+        FocalLength: 'Focal Length',
+        LensModel: 'Lens Model',
+        Orientation: 'Orientation',
+        ImageWidth: 'Image Width',
+        ImageHeight: 'Image Height',
+        SerialNumber: 'Device Serial Number',
+        Artist: 'Artist',
+        Copyright: 'Copyright',
+        GPSAltitude: 'GPS Altitude',
+      };
 
-    setResult(mockResult);
-    setIsAnalyzing(false);
+      const formatValue = (value: unknown): string | number | boolean | undefined => {
+        if (value instanceof Date) return value.toISOString();
+        if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+          return value;
+        }
+        if (Array.isArray(value) && value.every(item => ['string', 'number', 'boolean'].includes(typeof item))) {
+          return value.map(String).join(', ');
+        }
+        return undefined;
+      };
+
+      const metadata: Record<string, string | number | boolean> = {};
+      if (parsed) {
+        for (const [tag, label] of Object.entries(tagLabels)) {
+          const value = formatValue(parsed[tag]);
+          if (value !== undefined) metadata[label] = value;
+        }
+      }
+
+      const gpsLocation = gps &&
+        Number.isFinite(gps.latitude) &&
+        Number.isFinite(gps.longitude)
+        ? { lat: gps.latitude, lng: gps.longitude }
+        : undefined;
+
+      if (gpsLocation) {
+        metadata['GPS Latitude'] = gpsLocation.lat;
+        metadata['GPS Longitude'] = gpsLocation.lng;
+      }
+
+      const privacyRisks: string[] = [];
+      if (gpsLocation) privacyRisks.push('GPS coordinates are embedded in the image and may reveal where it was captured.');
+      if (parsed?.SerialNumber) privacyRisks.push('A device serial number is embedded in the image metadata.');
+      if (parsed?.DateTimeOriginal || parsed?.CreateDate) privacyRisks.push('A capture or creation timestamp is embedded in the image metadata.');
+      if (parsed?.Make || parsed?.Model) privacyRisks.push('Camera manufacturer or model information is embedded in the image metadata.');
+
+      setResult({
+        filename: selectedFile.name,
+        fileType: selectedFile.type || 'unknown image type',
+        fileSize: selectedFile.size,
+        extractedAt: new Date(),
+        metadata,
+        gpsLocation,
+        privacyRisks,
+      });
+    } catch (error) {
+      setAnalysisError(error instanceof Error
+        ? `Metadata extraction failed: ${error.message}`
+        : 'Metadata extraction failed for this image.');
+    } finally {
+      setIsAnalyzing(false);
+    }
   };
 
   const clearFile = () => {
     setFile(null);
     setResult(null);
+    setAnalysisError(null);
+  };
+
+  const handleExport = () => {
+    if (!result) return;
+    const blob = new Blob([JSON.stringify(result, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `metadata-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
   };
 
   const formatFileSize = (bytes: number) => {
@@ -122,7 +222,7 @@ export const MetadataAnalyzer = () => {
                   id="file-upload"
                   className="hidden"
                   onChange={handleFileSelect}
-                  accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
+                  accept="image/jpeg,image/png,image/tiff,image/heic,image/avif,.jpg,.jpeg,.png,.tif,.tiff,.heic,.avif"
                 />
                 <Button asChild variant="outline">
                   <label htmlFor="file-upload" className="cursor-pointer">
@@ -134,9 +234,9 @@ export const MetadataAnalyzer = () => {
           </div>
 
           <div className="mt-4 text-xs text-muted-foreground">
-            <p>Supported formats: Images (JPEG, PNG, TIFF, RAW), Documents (PDF, DOC, XLS)</p>
+            <p>Supported image formats: JPEG, PNG, TIFF, HEIC and AVIF.</p>
             <p className="mt-1">
-              Analysis uses ExifTool to extract embedded metadata including GPS, device info, and timestamps.
+              Images are inspected locally in this browser. File contents are not uploaded to a server.
             </p>
           </div>
         </CardContent>
@@ -148,7 +248,7 @@ export const MetadataAnalyzer = () => {
           <CardTitle className="text-lg flex items-center justify-between">
             Analysis Results
             {result && (
-              <Button variant="outline" size="sm">
+              <Button variant="outline" size="sm" onClick={handleExport}>
                 <Download className="w-4 h-4 mr-2" />
                 Export JSON
               </Button>
@@ -157,7 +257,12 @@ export const MetadataAnalyzer = () => {
         </CardHeader>
         <CardContent>
           <AnimatePresence mode="wait">
-            {isAnalyzing ? (
+            {analysisError ? (
+              <motion.div key="error" className="py-10 text-center text-destructive">
+                <AlertTriangle className="w-8 h-8 mx-auto mb-3" />
+                <p className="text-sm">{analysisError}</p>
+              </motion.div>
+            ) : isAnalyzing ? (
               <motion.div
                 key="analyzing"
                 initial={{ opacity: 0 }}
@@ -209,31 +314,33 @@ export const MetadataAnalyzer = () => {
                   </div>
                 )}
 
-                {/* Metadata Table */}
+                {/* Extracted fields only; no placeholder values are added. */}
                 <div className="space-y-2">
                   <h4 className="font-medium text-foreground">Extracted Metadata</h4>
-                  <div className="rounded-lg border border-border overflow-hidden">
-                    <table className="w-full text-sm">
-                      <tbody>
-                        {Object.entries(result.metadata).map(([key, value], i) => (
-                          <tr
-                            key={key}
-                            className={cn(
-                              'border-b border-border/50 last:border-0',
-                              i % 2 === 0 && 'bg-muted/20'
-                            )}
-                          >
-                            <td className="px-3 py-2 text-muted-foreground font-medium">
-                              {key}
-                            </td>
-                            <td className="px-3 py-2 font-mono text-foreground">
-                              {String(value)}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  {Object.keys(result.metadata).length > 0 ? (
+                    <div className="rounded-lg border border-border overflow-hidden">
+                      <table className="w-full text-sm">
+                        <tbody>
+                          {Object.entries(result.metadata).map(([key, value], i) => (
+                            <tr
+                              key={key}
+                              className={cn(
+                                'border-b border-border/50 last:border-0',
+                                i % 2 === 0 && 'bg-muted/20'
+                              )}
+                            >
+                              <td className="px-3 py-2 text-muted-foreground font-medium">{key}</td>
+                              <td className="px-3 py-2 font-mono text-foreground break-all">{String(value)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <p className="rounded-lg border border-border p-4 text-sm text-muted-foreground">
+                      No supported EXIF fields were found in this image. This does not prove that every metadata block is absent.
+                    </p>
+                  )}
                 </div>
               </motion.div>
             ) : (

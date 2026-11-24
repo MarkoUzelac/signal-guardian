@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Download, Upload, Clock, Activity, Zap, RefreshCw, Gauge } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useToast } from '@/hooks/use-toast';
+import { calculateMegabitsPerSecond, summarizeLatency } from '@/lib/networkMeasurements.mjs';
 
 interface SpeedResult {
   download: number;
@@ -44,17 +45,17 @@ export const SpeedTestPanel = ({ hasConsent }: { hasConsent: boolean }) => {
           signal,
         });
         pings.push(performance.now() - start);
-      } catch {
-        // Skip failed pings
+      } catch (error) {
+        if (signal.aborted) throw error;
+        // Ignore an individual failed ping; require at least one successful sample.
       }
     }
-    if (pings.length === 0) return { latency: 0, jitter: 0 };
+    if (pings.length === 0) {
+      throw new Error('Latency measurement failed: no ping request completed successfully.');
+    }
     
-    const avg = pings.reduce((a, b) => a + b, 0) / pings.length;
-    const jitter = pings.length > 1
-      ? Math.sqrt(pings.reduce((sum, p) => sum + Math.pow(p - avg, 2), 0) / pings.length)
-      : 0;
-    return { latency: Math.round(avg), jitter: Math.round(jitter * 10) / 10 };
+    const { latencyMs, jitterMs } = summarizeLatency(pings);
+    return { latency: Math.round(latencyMs), jitter: Math.round(jitterMs * 10) / 10 };
   }, []);
 
   const measureDownload = useCallback(async (signal: AbortSignal): Promise<number> => {
@@ -78,25 +79,23 @@ export const SpeedTestPanel = ({ hasConsent }: { hasConsent: boolean }) => {
           const { done, value } = await reader.read();
           if (done) break;
           received += value.length;
-          const elapsed = (performance.now() - start) / 1000;
-          if (elapsed > 0) {
-            const currentSpeed = (received * 8) / (elapsed * 1000000);
+          const elapsedMilliseconds = performance.now() - start;
+          if (elapsedMilliseconds > 0 && received > 0) {
+            const currentSpeed = calculateMegabitsPerSecond(received, elapsedMilliseconds);
             setLiveSpeed(Math.round(currentSpeed * 10) / 10);
           }
         }
         
-        const elapsed = (performance.now() - start) / 1000;
-        const speed = (received * 8) / (elapsed * 1000000); // Mbps
-        speeds.push(speed);
-      } catch {
-        // Try next endpoint
+        const elapsedMilliseconds = performance.now() - start;
+        speeds.push(calculateMegabitsPerSecond(received, elapsedMilliseconds));
+      } catch (error) {
+        if (signal.aborted) throw error;
+        // Try the next test endpoint when the current one is unavailable.
       }
     }
 
     if (speeds.length === 0) {
-      // Fallback: use Network Information API
-      const conn = (navigator as any).connection;
-      return conn?.downlink || 0;
+      throw new Error('Download measurement failed: no test endpoint returned readable data.');
     }
 
     // Return the average of successful tests
@@ -104,23 +103,22 @@ export const SpeedTestPanel = ({ hasConsent }: { hasConsent: boolean }) => {
   }, []);
 
   const measureUpload = useCallback(async (signal: AbortSignal): Promise<number> => {
-    try {
-      const data = new Uint8Array(1000000); // 1MB
-      crypto.getRandomValues(data);
-      
-      const start = performance.now();
-      await fetch(UPLOAD_ENDPOINT, {
-        method: 'POST',
-        body: data,
-        signal,
-        mode: 'cors',
-      });
-      const elapsed = (performance.now() - start) / 1000;
-      return (data.length * 8) / (elapsed * 1000000);
-    } catch {
-      const conn = (navigator as any).connection;
-      return (conn?.downlink || 0) * 0.3;
+    const data = new Uint8Array(1000000); // 1MB
+    crypto.getRandomValues(data);
+
+    const start = performance.now();
+    const response = await fetch(UPLOAD_ENDPOINT, {
+      method: 'POST',
+      body: data,
+      signal,
+      mode: 'cors',
+    });
+    if (!response.ok) {
+      throw new Error(`Upload test endpoint failed with HTTP ${response.status}.`);
     }
+
+    const elapsedMilliseconds = performance.now() - start;
+    return calculateMegabitsPerSecond(data.length, elapsedMilliseconds);
   }, []);
 
   const runTest = useCallback(async () => {
@@ -167,7 +165,15 @@ export const SpeedTestPanel = ({ hasConsent }: { hasConsent: boolean }) => {
       toast({ title: "Speed test complete", description: `↓${download.toFixed(1)} ↑${upload.toFixed(1)} Mbps` });
     } catch (e) {
       if (e instanceof Error && e.name === 'AbortError') {
+        setPhase('idle');
         toast({ title: "Test cancelled", variant: "destructive" });
+      } else {
+        toast({
+          title: "Speed test failed",
+          description: e instanceof Error ? e.message : "An unexpected error interrupted the test.",
+          variant: "destructive",
+        });
+        setPhase('idle');
       }
     } finally {
       setIsTesting(false);

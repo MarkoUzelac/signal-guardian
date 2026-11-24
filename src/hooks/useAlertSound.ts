@@ -2,6 +2,10 @@ import { useCallback, useRef, useState } from 'react';
 
 type SoundType = 'error' | 'warning' | 'critical' | 'success' | 'notification';
 
+type WindowWithWebkitAudioContext = Window & {
+  webkitAudioContext?: typeof AudioContext;
+};
+
 // Web Audio API based sound generator
 const createOscillatorSound = (
   audioContext: AudioContext,
@@ -47,7 +51,11 @@ export const useAlertSound = () => {
 
   const getAudioContext = useCallback(() => {
     if (!audioContextRef.current) {
-      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const AudioContextConstructor = window.AudioContext || (window as WindowWithWebkitAudioContext).webkitAudioContext;
+      if (!AudioContextConstructor) {
+        throw new Error('Web Audio API is not supported by this browser.');
+      }
+      audioContextRef.current = new AudioContextConstructor();
     }
     return audioContextRef.current;
   }, []);

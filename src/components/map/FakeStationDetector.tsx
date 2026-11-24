@@ -1,11 +1,11 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { CellTower } from '@/types/signal';
 import { analyzeTower, getThreatLevel, type ThreatLevel } from '@/lib/anomalyEngine';
 import { cn } from '@/lib/utils';
-import { AlertTriangle, Radio, MapPin, RefreshCw, Shield, Zap } from 'lucide-react';
+import { AlertTriangle, Radio, RefreshCw, Shield } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface FakeStationDetectorProps {
@@ -25,11 +25,10 @@ const getThreatBadge = (level: ThreatLevel) => {
 };
 
 export const FakeStationDetector = ({ towers, onTowerSelect, onRefresh }: FakeStationDetectorProps) => {
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   const analyzedTowers = useMemo(() => {
     return towers.map(tower => {
-      const analysis = analyzeTower(tower, towers);
+      const analysis = analyzeTower(tower, towers, tower.encryption ?? null);
       const level = getThreatLevel(analysis.score);
       return { tower, analysis, level };
     }).sort((a, b) => b.analysis.score - a.analysis.score);
@@ -39,11 +38,8 @@ export const FakeStationDetector = ({ towers, onTowerSelect, onRefresh }: FakeSt
   const suspicious = analyzedTowers.filter(t => t.level === 'MEDIUM');
 
   const handleRescan = () => {
-    setIsAnalyzing(true);
-    setTimeout(() => {
-      setIsAnalyzing(false);
-      onRefresh?.();
-    }, 1500);
+    if (towers.length === 0) return;
+    onRefresh?.();
   };
 
   return (
@@ -54,28 +50,33 @@ export const FakeStationDetector = ({ towers, onTowerSelect, onRefresh }: FakeSt
             <Shield className="w-4 h-4 text-destructive" />
             Fake Base Station Detector
           </span>
-          <Button variant="ghost" size="sm" onClick={handleRescan} disabled={isAnalyzing} className="h-7">
-            <RefreshCw className={cn("w-3 h-3 mr-1", isAnalyzing && "animate-spin")} />
-            Scan
+          <Button variant="ghost" size="sm" onClick={handleRescan} disabled={towers.length === 0} className="h-7">
+            <RefreshCw className="w-3 h-3 mr-1" />
+            {towers.length === 0 ? 'Feed offline' : 'Refresh'}
           </Button>
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
-        {/* Summary */}
-        <div className="grid grid-cols-3 gap-2 text-center">
-          <div className={cn("p-2 rounded-lg border", threats.length > 0 ? "bg-destructive/10 border-destructive/30" : "bg-muted/30 border-border")}>
-            <p className={cn("text-lg font-bold font-mono", threats.length > 0 ? "text-destructive" : "text-foreground")}>{threats.length}</p>
-            <p className="text-[10px] text-muted-foreground">Threats</p>
+        {/* Empty telemetry is not a clean security result. */}
+        {towers.length === 0 ? (
+          <div className="rounded-lg border border-warning/40 bg-warning/5 p-3 space-y-1">
+            <p className="text-sm font-semibold">No cellular telemetry connected</p>
+            <p className="text-xs text-muted-foreground">
+              Detection has not run. Threat and safety status are unknown until real cell records are supplied.
+            </p>
           </div>
-          <div className={cn("p-2 rounded-lg border", suspicious.length > 0 ? "bg-warning/10 border-warning/30" : "bg-muted/30 border-border")}>
-            <p className={cn("text-lg font-bold font-mono", suspicious.length > 0 ? "text-warning" : "text-foreground")}>{suspicious.length}</p>
-            <p className="text-[10px] text-muted-foreground">Suspicious</p>
+        ) : (
+          <div className="grid grid-cols-2 gap-2 text-center">
+            <div className={cn("p-2 rounded-lg border", threats.length > 0 ? "bg-destructive/10 border-destructive/30" : "bg-muted/30 border-border")}>
+              <p className={cn("text-lg font-bold font-mono", threats.length > 0 ? "text-destructive" : "text-foreground")}>{threats.length}</p>
+              <p className="text-[10px] text-muted-foreground">High / critical heuristic flags</p>
+            </div>
+            <div className={cn("p-2 rounded-lg border", suspicious.length > 0 ? "bg-warning/10 border-warning/30" : "bg-muted/30 border-border")}>
+              <p className={cn("text-lg font-bold font-mono", suspicious.length > 0 ? "text-warning" : "text-foreground")}>{suspicious.length}</p>
+              <p className="text-[10px] text-muted-foreground">Medium heuristic flags</p>
+            </div>
           </div>
-          <div className="p-2 rounded-lg bg-success/10 border border-success/30">
-            <p className="text-lg font-bold font-mono text-success">{analyzedTowers.length - threats.length - suspicious.length}</p>
-            <p className="text-[10px] text-muted-foreground">Clean</p>
-          </div>
-        </div>
+        )}
 
         {/* Threat List */}
         {threats.length > 0 && (
@@ -140,10 +141,12 @@ export const FakeStationDetector = ({ towers, onTowerSelect, onRefresh }: FakeSt
           </div>
         )}
 
-        {threats.length === 0 && suspicious.length === 0 && (
+        {towers.length > 0 && threats.length === 0 && suspicious.length === 0 && (
           <div className="text-center py-4">
-            <Shield className="w-8 h-8 mx-auto text-success mb-2 opacity-50" />
-            <p className="text-xs text-muted-foreground">No fake base stations detected in your area</p>
+            <Shield className="w-8 h-8 mx-auto text-muted-foreground mb-2 opacity-50" />
+            <p className="text-xs text-muted-foreground">
+              No supplied records exceeded the configured heuristic thresholds. This is not a guarantee of network safety.
+            </p>
           </div>
         )}
       </CardContent>

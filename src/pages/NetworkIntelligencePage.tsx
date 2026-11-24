@@ -31,6 +31,7 @@ import { useToast } from '@/hooks/use-toast';
 import { SpeedTestPanel } from '@/components/network/SpeedTestPanel';
 import { getOperatorsByIso } from '@/lib/worldOperators';
 import { z } from 'zod';
+import { calculateMegabitsPerSecond, summarizeLatency } from '@/lib/networkMeasurements.mjs';
 
 // Zod schema for IP API response validation
 const IpApiSchema = z.object({
@@ -61,6 +62,20 @@ interface NetworkInfo {
   saveData?: boolean;
   type?: string;
 }
+
+interface NetworkInformationConnection extends EventTarget {
+  readonly effectiveType?: string;
+  readonly downlink?: number;
+  readonly rtt?: number;
+  readonly saveData?: boolean;
+  readonly type?: string;
+}
+
+type NavigatorWithNetworkInformation = Navigator & {
+  connection?: NetworkInformationConnection;
+  mozConnection?: NetworkInformationConnection;
+  webkitConnection?: NetworkInformationConnection;
+};
 
 interface CarrierInfo {
   name: string;
@@ -115,9 +130,10 @@ const NetworkIntelligencePage = () => {
   }, []);
 
   const fetchNetworkInfo = useCallback(() => {
-    const connection = (navigator as any).connection || 
-                       (navigator as any).mozConnection || 
-                       (navigator as any).webkitConnection;
+    const browserNavigator = navigator as NavigatorWithNetworkInformation;
+    const connection = browserNavigator.connection ??
+      browserNavigator.mozConnection ??
+      browserNavigator.webkitConnection;
     
     if (connection) {
       const update = () => {
@@ -136,18 +152,7 @@ const NetworkIntelligencePage = () => {
     return undefined;
   }, []);
 
-  useEffect(() => {
-    const cleanup = fetchNetworkInfo();
-    analyzeSecurityIndicators();
-    
-    if (hasConsent === true) {
-      fetchIpInfo();
-    } else if (hasConsent === false) {
-      setIsLoading(false);
-    }
 
-    return () => cleanup?.();
-  }, [hasConsent, fetchNetworkInfo]);
 
   const handleConsentGiven = () => {
     localStorage.setItem(NETWORK_CONSENT_KEY, 'true');
@@ -169,62 +174,53 @@ const NetworkIntelligencePage = () => {
     });
   };
 
-  const fetchIpInfo = async () => {
-    // Create abort controller for timeout
+  const fetchIpInfo = useCallback(async () => {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+    const timeoutId = window.setTimeout(() => controller.abort(), 5000);
 
     try {
       const response = await fetch('https://ipapi.co/json/', {
-        signal: controller.signal
+        signal: controller.signal,
       });
-      clearTimeout(timeoutId);
+      if (!response.ok) {
+        throw new Error(`Network information provider returned HTTP ${response.status}.`);
+      }
 
-      if (response.ok) {
-        const rawData = await response.json();
-        
-        // Validate response with Zod schema
-        const validationResult = IpApiSchema.safeParse(rawData);
-        
-        if (!validationResult.success) {
-          console.warn('IP API response validation failed');
-          toast({
-            title: "Invalid data received",
-            description: "Network information may be incomplete.",
-            variant: "destructive"
-          });
-          setIsLoading(false);
-          return;
-        }
-        
-        const data = validationResult.data;
-        setIpInfo(data);
-        
-        // Set carrier info with sanitized data
-        setCarrierInfo({
-          name: sanitizeDisplayText(data.org) || 'Unknown Carrier',
-          mcc: sanitizeDisplayText(data.country_code) || 'N/A',
-          mnc: 'N/A',
-          country: sanitizeDisplayText(data.country_name) || 'Unknown',
-          technology: networkInfo?.effectiveType?.toUpperCase() || '4G',
-          isRoaming: false
-        });
+      const rawData: unknown = await response.json();
+      const validationResult = IpApiSchema.safeParse(rawData);
+
+      if (!validationResult.success) {
+        throw new Error('Network information provider returned an invalid response.');
       }
+
+      const data = validationResult.data;
+      setIpInfo(data);
+      setCarrierInfo({
+        name: sanitizeDisplayText(data.org) || 'Unknown Carrier',
+        mcc: 'N/A',
+        mnc: 'N/A',
+        country: sanitizeDisplayText(data.country_name) || 'Unknown',
+        technology: 'Unknown',
+        isRoaming: false,
+      });
     } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError') {
-        toast({
-          title: "Request timeout",
-          description: "Network information request timed out.",
-          variant: "destructive"
-        });
-      } else {
-        console.warn('Failed to fetch IP info');
-      }
+      const message = error instanceof Error && error.name === 'AbortError'
+        ? 'Network information request timed out.'
+        : error instanceof Error
+          ? error.message
+          : 'Network information could not be retrieved.';
+      toast({
+        title: 'Network information unavailable',
+        description: message,
+        variant: 'destructive',
+      });
     } finally {
+      window.clearTimeout(timeoutId);
       setIsLoading(false);
     }
-  };
-  const analyzeSecurityIndicators = () => {
+  }, [toast]);
+
+  const analyzeSecurityIndicators = useCallback(() => {
     const indicators: SecurityIndicator[] = [
       {
         id: 'encryption',
@@ -281,7 +277,7 @@ const NetworkIntelligencePage = () => {
     ];
 
     setSecurityIndicators(indicators);
-  };
+  }, [networkInfo]);
 
   const getNetworkTypeRisk = (type?: string): SecurityIndicator['status'] => {
     switch (type) {
@@ -304,101 +300,125 @@ const NetworkIntelligencePage = () => {
     return 'danger';
   };
 
+  useEffect(() => {
+    const cleanup = fetchNetworkInfo();
+    return () => cleanup?.();
+  }, [fetchNetworkInfo]);
+
+  useEffect(() => {
+    analyzeSecurityIndicators();
+  }, [analyzeSecurityIndicators]);
+
+  useEffect(() => {
+    if (hasConsent === true) {
+      void fetchIpInfo();
+    } else if (hasConsent === false) {
+      setIsLoading(false);
+    }
+  }, [hasConsent, fetchIpInfo]);
+
   const runSpeedTest = async () => {
-    // Require consent for external API calls
-    if (!hasConsent) {
+    if (hasConsent !== true) {
       toast({
         title: "Enable Network Diagnostics",
-        description: "Please enable network diagnostics to run speed tests.",
-        variant: "destructive"
+        description: "Please enable network diagnostics before running a speed test.",
+        variant: "destructive",
       });
       return;
     }
 
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 15000);
     setIsTestingSpeed(true);
     setSpeedProgress(0);
-
-    // Simulate speed test with realistic progression
-    const testDuration = 5000;
-    const startTime = Date.now();
-    
-    const progressInterval = setInterval(() => {
-      const elapsed = Date.now() - startTime;
-      const progress = Math.min((elapsed / testDuration) * 100, 100);
-      setSpeedProgress(progress);
-    }, 100);
-
-    // Create abort controller for timeout
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout for speed test
+    setSpeedTest(null);
 
     try {
+      const latencySamples: number[] = [];
+      for (let i = 0; i < 5; i += 1) {
+        const pingStart = performance.now();
+        const pingResponse = await fetch('https://speed.cloudflare.com/__down?bytes=0', {
+          cache: 'no-store',
+          mode: 'cors',
+          signal: controller.signal,
+        });
+        if (pingResponse.ok) {
+          await pingResponse.arrayBuffer();
+          latencySamples.push(performance.now() - pingStart);
+        }
+        setSpeedProgress(5 + (i + 1) * 5);
+      }
+
+      if (latencySamples.length === 0) {
+        throw new Error('Latency measurement failed: no ping request completed successfully.');
+      }
+
+      const { latencyMs, jitterMs } = summarizeLatency(latencySamples);
+      const averageLatency = latencyMs;
+
+      setSpeedProgress(35);
       const downloadStart = performance.now();
-      
-      // Download a sample file to measure speed
-      const response = await fetch('https://httpbin.org/bytes/500000', { 
+      const downloadResponse = await fetch('https://speed.cloudflare.com/__down?bytes=500000', {
         cache: 'no-store',
         mode: 'cors',
-        signal: controller.signal
+        signal: controller.signal,
       });
-      clearTimeout(timeoutId);
-      
-      if (response.ok) {
-        await response.blob();
-        const downloadEnd = performance.now();
-        const downloadTime = (downloadEnd - downloadStart) / 1000; // seconds
-        const downloadSpeed = (500000 * 8) / (downloadTime * 1000000); // Mbps
-
-        // Estimate other metrics based on Network API
-        const latency = networkInfo?.rtt || Math.random() * 50 + 10;
-        const jitter = Math.random() * 10 + 2;
-        
-        // Estimate upload as percentage of download
-        const uploadSpeed = downloadSpeed * (0.3 + Math.random() * 0.3);
-
-        setSpeedTest({
-          download: Math.round(downloadSpeed * 100) / 100,
-          upload: Math.round(uploadSpeed * 100) / 100,
-          latency: Math.round(latency),
-          jitter: Math.round(jitter * 10) / 10,
-          timestamp: new Date()
-        });
-
-        toast({
-          title: "Speed Test Complete",
-          description: `Download: ${downloadSpeed.toFixed(2)} Mbps`,
-        });
+      if (!downloadResponse.ok) {
+        throw new Error(`Download endpoint returned HTTP ${downloadResponse.status}.`);
       }
+      const downloadData = await downloadResponse.arrayBuffer();
+      const downloadElapsedMilliseconds = performance.now() - downloadStart;
+      const downloadSpeed = calculateMegabitsPerSecond(downloadData.byteLength, downloadElapsedMilliseconds);
+
+      setSpeedProgress(65);
+      const uploadData = new Uint8Array(500000);
+      for (let offset = 0; offset < uploadData.length; offset += 65536) {
+        crypto.getRandomValues(uploadData.subarray(offset, Math.min(offset + 65536, uploadData.length)));
+      }
+
+      const uploadStart = performance.now();
+      const uploadResponse = await fetch('https://httpbin.org/post', {
+        method: 'POST',
+        body: uploadData,
+        cache: 'no-store',
+        mode: 'cors',
+        signal: controller.signal,
+      });
+      if (!uploadResponse.ok) {
+        throw new Error(`Upload endpoint returned HTTP ${uploadResponse.status}.`);
+      }
+      const uploadElapsedMilliseconds = performance.now() - uploadStart;
+      const uploadSpeed = calculateMegabitsPerSecond(uploadData.byteLength, uploadElapsedMilliseconds);
+
+      setSpeedTest({
+        download: Math.round(downloadSpeed * 100) / 100,
+        upload: Math.round(uploadSpeed * 100) / 100,
+        latency: Math.round(averageLatency),
+        jitter: Math.round(jitterMs * 10) / 10,
+        timestamp: new Date(),
+      });
+      setSpeedProgress(100);
+      toast({
+        title: "Speed Test Complete",
+        description: `Download: ${downloadSpeed.toFixed(2)} Mbps · Upload: ${uploadSpeed.toFixed(2)} Mbps`,
+      });
     } catch (error) {
-      clearTimeout(timeoutId);
-      
-      if (error instanceof Error && error.name === 'AbortError') {
-        toast({
-          title: "Speed Test Timeout",
-          description: "The speed test took too long. Please try again.",
-          variant: "destructive"
-        });
-      } else {
-        // Fallback to simulated results based on Network API
-        setSpeedTest({
-          download: networkInfo?.downlink || Math.random() * 50 + 10,
-          upload: (networkInfo?.downlink || Math.random() * 50 + 10) * 0.3,
-          latency: networkInfo?.rtt || Math.random() * 50 + 10,
-          jitter: Math.random() * 10 + 2,
-          timestamp: new Date()
-        });
-        
-        toast({
-          title: "Speed Test Complete",
-          description: "Results based on browser network estimation",
-          variant: "default"
-        });
-      }
+      setSpeedTest(null);
+      setSpeedProgress(0);
+      const message = error instanceof Error && error.name === 'AbortError'
+        ? 'The speed test timed out. Please try again.'
+        : error instanceof Error
+          ? error.message
+          : 'An unexpected error interrupted the speed test.';
+      toast({
+        title: "Speed Test Failed",
+        description: message,
+        variant: "destructive",
+      });
+    } finally {
+      window.clearTimeout(timeoutId);
+      setIsTestingSpeed(false);
     }
-
-    clearInterval(progressInterval);
-    setSpeedProgress(100);
-    setIsTestingSpeed(false);
   };
 
   const getStatusColor = (status: SecurityIndicator['status']) => {
