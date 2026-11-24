@@ -37,9 +37,9 @@ jobs:
       - name: Reconcile npm lockfile for same-repository pull requests
         id: lockfile
         if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
-        run: npm audit fix --package-lock-only --no-fund
+        run: npm audit fix --package-lock-only --no-fund --audit-level=high
 
-      - name: Commit reconciled lockfile and dispatch verification for new commit
+      - name: Commit reconciled lockfile and trigger PR verification on updated head
         id: commit_lockfile
         if: ${{ always() && steps.lockfile.outcome == 'success' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
         shell: bash
