@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Radio, Wifi, AlertTriangle, Activity, Shield, Power, Volume2, VolumeX, Crown, ChevronDown } from 'lucide-react';
+import { Radio, Wifi, AlertTriangle, Activity, Shield, Power, Crown, ChevronDown } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Header } from '@/components/layout/Header';
 import { StatsCard } from '@/components/dashboard/StatsCard';
@@ -12,64 +12,17 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { IMSIRecord, Alert } from '@/types/signal';
-import { useAlertSound } from '@/hooks/useAlertSound';
 import { useGeolocation } from '@/hooks/useGeolocation';
-import { useCountry } from '@/hooks/useCountry';
 import { CROATIAN_FREQUENCY_BANDS } from '@/lib/croatianOperators';
 import { cn } from '@/lib/utils';
-import {
-  generateMockIMSIRecords,
-  generateMockAlerts,
-  simulateRealtimeIMSI,
-  simulateRealtimeAlert,
-} from '@/lib/mockData';
 
 const Index = () => {
-  const [isScanning, setIsScanning] = useState(true);
+  const isScanning = false;
   const [imsiRecords, setImsiRecords] = useState<IMSIRecord[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
-  const [frequency, setFrequency] = useState('935.2 MHz');
+  const frequency = 'Unavailable';
   const [bandsOpen, setBandsOpen] = useState(false);
-  const { playSound, isMuted, toggleMute } = useAlertSound();
   const { hasRealLocation, latitude, longitude } = useGeolocation();
-  const { country } = useCountry(latitude, longitude);
-
-  // Initialize with mock data based on the user's country operators
-  useEffect(() => {
-    setImsiRecords(generateMockIMSIRecords(15, country));
-    setAlerts(generateMockAlerts());
-  }, [country]);
-
-  // Simulate real-time data with sound alerts
-  useEffect(() => {
-    if (!isScanning) return;
-
-    const unsubIMSI = simulateRealtimeIMSI(
-      (record) => {
-        setImsiRecords(prev => [record, ...prev].slice(0, 50));
-      },
-      () => {},
-      country
-    );
-
-    const unsubAlert = simulateRealtimeAlert(
-      (alert) => {
-        setAlerts(prev => [alert, ...prev]);
-      },
-      (type) => {
-        if (type === 'critical') {
-          playSound('critical');
-        } else if (type === 'warning') {
-          playSound('warning');
-        }
-      }
-    );
-
-    return () => {
-      unsubIMSI();
-      unsubAlert();
-    };
-  }, [isScanning, playSound, country]);
 
   const handleAcknowledgeAlert = (id: string) => {
     setAlerts(prev =>
@@ -87,8 +40,8 @@ const Index = () => {
   return (
     <MainLayout>
       <Header
-        title="Live Signal Monitor"
-        subtitle="Real-time GSM/LTE signal analysis"
+        title="Signal Guardian"
+        subtitle="Cellular telemetry is not connected — no live scan is running"
       />
 
       <div className="p-3 md:p-6 space-y-4">
@@ -103,7 +56,7 @@ const Index = () => {
               <Crown className="w-5 h-5 text-primary shrink-0" />
               <div className="min-w-0">
                 <p className="font-semibold text-foreground text-sm truncate">Upgrade to Pro</p>
-                <p className="text-xs text-muted-foreground hidden sm:block">Real-time tower data & advanced alerts</p>
+                <p className="text-xs text-muted-foreground hidden sm:block">Native Android telemetry connection required</p>
               </div>
             </div>
             <Button size="sm" className="bg-primary hover:bg-primary/90 shrink-0 h-8 text-xs">
@@ -113,42 +66,42 @@ const Index = () => {
           </div>
         </motion.div>
 
-        {/* Stats Row */}
+        {/* No connected device feed: counts must not imply a clean scan. */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
           <StatsCard
             title="Signals"
-            value={imsiRecords.length}
-            subtitle="Last hour"
+            value="N/A"
+            subtitle="No telemetry source"
             icon={Wifi}
             trend={{ value: 12, isPositive: true }}
             variant="primary"
           />
           <StatsCard
             title="Suspicious"
-            value={suspiciousCount}
-            subtitle="Attention"
+            value="N/A"
+            subtitle="Analysis unavailable"
             icon={AlertTriangle}
             variant={suspiciousCount > 0 ? 'warning' : 'default'}
           />
           <StatsCard
             title="Critical"
-            value={criticalAlerts}
-            subtitle="Unacked"
+            value="N/A"
+            subtitle="No alert feed"
             icon={Activity}
             variant={criticalAlerts > 0 ? 'danger' : 'default'}
           />
           <StatsCard
             title="Status"
-            value="Active"
-            subtitle="Protected"
+            value="Disconnected"
+            subtitle="Not scanning"
             icon={Shield}
-            variant="success"
+            variant="default"
           />
         </div>
 
         {/* Main Content */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          {/* IMSI Table - Full width on mobile, takes 2 cols on desktop */}
+          {/* No fabricated IMSI records are rendered when no native telemetry source is connected. */}
           <div className="lg:col-span-2 order-2 lg:order-1">
             <IMSITable records={imsiRecords} maxRows={10} />
           </div>
@@ -163,18 +116,7 @@ const Index = () => {
                     <Radio className="w-4 h-4 text-primary" />
                     Scan Control
                   </CardTitle>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={toggleMute}
-                    className="h-7 w-7 p-0"
-                  >
-                    {isMuted ? (
-                      <VolumeX className="w-4 h-4 text-muted-foreground" />
-                    ) : (
-                      <Volume2 className="w-4 h-4 text-primary" />
-                    )}
-                  </Button>
+
                 </div>
               </CardHeader>
               <CardContent className="space-y-3">
@@ -203,19 +145,20 @@ const Index = () => {
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground">Location:</span>
                     <span className="text-foreground text-xs font-mono">
-                      {hasRealLocation ? `${latitude?.toFixed(2)}°, ${longitude?.toFixed(2)}°` : 'Croatia'}
+                      {hasRealLocation ? `${latitude?.toFixed(2)}°, ${longitude?.toFixed(2)}°` : 'Unavailable'}
                     </span>
                   </div>
                 </div>
 
                 <Button
-                  onClick={() => setIsScanning(!isScanning)}
-                  variant={isScanning ? 'destructive' : 'default'}
+                  type="button"
+                  disabled
+                  variant="secondary"
                   className="w-full h-9"
                   size="sm"
                 >
                   <Power className="w-4 h-4 mr-2" />
-                  {isScanning ? 'Stop' : 'Start'}
+                  Cellular telemetry disconnected
                 </Button>
               </CardContent>
             </Card>
