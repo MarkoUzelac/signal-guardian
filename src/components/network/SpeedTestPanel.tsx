@@ -48,7 +48,9 @@ export const SpeedTestPanel = ({ hasConsent }: { hasConsent: boolean }) => {
         // Skip failed pings
       }
     }
-    if (pings.length === 0) return { latency: 0, jitter: 0 };
+    if (pings.length === 0) {
+      throw new Error('Latency measurement failed: no ping request completed successfully.');
+    }
     
     const avg = pings.reduce((a, b) => a + b, 0) / pings.length;
     const jitter = pings.length > 1
@@ -94,9 +96,7 @@ export const SpeedTestPanel = ({ hasConsent }: { hasConsent: boolean }) => {
     }
 
     if (speeds.length === 0) {
-      // Fallback: use Network Information API
-      const conn = (navigator as any).connection;
-      return conn?.downlink || 0;
+      throw new Error('Download measurement failed: no test endpoint returned readable data.');
     }
 
     // Return the average of successful tests
@@ -109,18 +109,20 @@ export const SpeedTestPanel = ({ hasConsent }: { hasConsent: boolean }) => {
       crypto.getRandomValues(data);
       
       const start = performance.now();
-      await fetch(UPLOAD_ENDPOINT, {
+      const response = await fetch(UPLOAD_ENDPOINT, {
         method: 'POST',
         body: data,
         signal,
         mode: 'cors',
       });
+      if (!response.ok) {
+        throw new Error(`Upload test endpoint failed with HTTP ${response.status}.`);
+      }
       const elapsed = (performance.now() - start) / 1000;
+      if (elapsed <= 0) {
+        throw new Error('Upload measurement returned an invalid elapsed time.');
+      }
       return (data.length * 8) / (elapsed * 1000000);
-    } catch {
-      const conn = (navigator as any).connection;
-      return (conn?.downlink || 0) * 0.3;
-    }
   }, []);
 
   const runTest = useCallback(async () => {
@@ -168,6 +170,13 @@ export const SpeedTestPanel = ({ hasConsent }: { hasConsent: boolean }) => {
     } catch (e) {
       if (e instanceof Error && e.name === 'AbortError') {
         toast({ title: "Test cancelled", variant: "destructive" });
+      } else {
+        toast({
+          title: "Speed test failed",
+          description: e instanceof Error ? e.message : "An unexpected error interrupted the test.",
+          variant: "destructive",
+        });
+        setPhase('idle');
       }
     } finally {
       setIsTesting(false);
