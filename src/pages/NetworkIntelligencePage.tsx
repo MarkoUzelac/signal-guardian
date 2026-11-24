@@ -62,6 +62,20 @@ interface NetworkInfo {
   type?: string;
 }
 
+interface NetworkInformationConnection extends EventTarget {
+  readonly effectiveType?: string;
+  readonly downlink?: number;
+  readonly rtt?: number;
+  readonly saveData?: boolean;
+  readonly type?: string;
+}
+
+type NavigatorWithNetworkInformation = Navigator & {
+  connection?: NetworkInformationConnection;
+  mozConnection?: NetworkInformationConnection;
+  webkitConnection?: NetworkInformationConnection;
+};
+
 interface CarrierInfo {
   name: string;
   mcc: string;
@@ -115,9 +129,10 @@ const NetworkIntelligencePage = () => {
   }, []);
 
   const fetchNetworkInfo = useCallback(() => {
-    const connection = (navigator as any).connection || 
-                       (navigator as any).mozConnection || 
-                       (navigator as any).webkitConnection;
+    const browserNavigator = navigator as NavigatorWithNetworkInformation;
+    const connection = browserNavigator.connection ??
+      browserNavigator.mozConnection ??
+      browserNavigator.webkitConnection;
     
     if (connection) {
       const update = () => {
