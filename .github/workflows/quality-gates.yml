@@ -15,9 +15,9 @@ concurrency:
 
 jobs:
   quality:
-    name: Build, lint, and type-check
+    name: Build, lint, type-check, and security audit
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - name: Check out exact commit
         uses: actions/checkout@v4
@@ -32,16 +32,37 @@ jobs:
         run: test -s AGENT_RELIABILITY.md
 
       - name: Install locked dependencies
+        id: install
         run: npm ci --no-audit --no-fund
 
       - name: Lint
+        if: ${{ always() && steps.install.outcome == 'success' }}
         run: npm run lint
 
       - name: Type-check application
+        if: ${{ always() && steps.install.outcome == 'success' }}
         run: npx tsc --noEmit --project tsconfig.app.json
 
       - name: Type-check Vite configuration
+        if: ${{ always() && steps.install.outcome == 'success' }}
         run: npx tsc --noEmit --project tsconfig.node.json
 
+      - name: Run repository tests when configured
+        if: ${{ always() && steps.install.outcome == 'success' }}
+        shell: bash
+        run: |
+          if [ "$(node -e "console.log(require('./package.json').scripts?.test ? 'yes' : 'no')")" = "yes" ]; then
+            npm test
+          else
+            echo "::warning::No test script is configured in package.json; automated test coverage remains unverified."
+          fi
+
+      - name: Audit production dependencies
+        if: ${{ always() && steps.install.outcome == 'success' }}
+        run: npm audit --omit=dev --audit-level=high
+
       - name: Build production bundle
-        run: npm run build
+        if: ${{ always() && steps.install.outcome == 'success' }}
+        run: |
+          npm run build
+          test -s dist/index.html
