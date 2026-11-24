@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Download, Upload, Clock, Activity, Zap, RefreshCw, Gauge } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useToast } from '@/hooks/use-toast';
+import { calculateMegabitsPerSecond, summarizeLatency } from '@/lib/networkMeasurements.mjs';
 
 interface SpeedResult {
   download: number;
@@ -53,11 +54,8 @@ export const SpeedTestPanel = ({ hasConsent }: { hasConsent: boolean }) => {
       throw new Error('Latency measurement failed: no ping request completed successfully.');
     }
     
-    const avg = pings.reduce((a, b) => a + b, 0) / pings.length;
-    const jitter = pings.length > 1
-      ? Math.sqrt(pings.reduce((sum, p) => sum + Math.pow(p - avg, 2), 0) / pings.length)
-      : 0;
-    return { latency: Math.round(avg), jitter: Math.round(jitter * 10) / 10 };
+    const { latencyMs, jitterMs } = summarizeLatency(pings);
+    return { latency: Math.round(latencyMs), jitter: Math.round(jitterMs * 10) / 10 };
   }, []);
 
   const measureDownload = useCallback(async (signal: AbortSignal): Promise<number> => {
@@ -81,16 +79,15 @@ export const SpeedTestPanel = ({ hasConsent }: { hasConsent: boolean }) => {
           const { done, value } = await reader.read();
           if (done) break;
           received += value.length;
-          const elapsed = (performance.now() - start) / 1000;
-          if (elapsed > 0) {
-            const currentSpeed = (received * 8) / (elapsed * 1000000);
+          const elapsedMilliseconds = performance.now() - start;
+          if (elapsedMilliseconds > 0 && received > 0) {
+            const currentSpeed = calculateMegabitsPerSecond(received, elapsedMilliseconds);
             setLiveSpeed(Math.round(currentSpeed * 10) / 10);
           }
         }
         
-        const elapsed = (performance.now() - start) / 1000;
-        const speed = (received * 8) / (elapsed * 1000000); // Mbps
-        speeds.push(speed);
+        const elapsedMilliseconds = performance.now() - start;
+        speeds.push(calculateMegabitsPerSecond(received, elapsedMilliseconds));
       } catch (error) {
         if (signal.aborted) throw error;
         // Try the next test endpoint when the current one is unavailable.
@@ -120,11 +117,8 @@ export const SpeedTestPanel = ({ hasConsent }: { hasConsent: boolean }) => {
       throw new Error(`Upload test endpoint failed with HTTP ${response.status}.`);
     }
 
-    const elapsed = (performance.now() - start) / 1000;
-    if (elapsed <= 0) {
-      throw new Error('Upload measurement returned an invalid elapsed time.');
-    }
-    return (data.length * 8) / (elapsed * 1000000);
+    const elapsedMilliseconds = performance.now() - start;
+    return calculateMegabitsPerSecond(data.length, elapsedMilliseconds);
   }, []);
 
   const runTest = useCallback(async () => {
