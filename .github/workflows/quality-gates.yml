@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   quality:
-    name: Build, lint, type-check, and security audit
+    name: Build, lint, type-check, tests, and security audit
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -31,8 +31,13 @@ jobs:
       - name: Verify release policy is present
         run: test -s AGENT_RELIABILITY.md
 
-      - name: Install locked dependencies
+      - name: Apply non-breaking npm lockfile security updates
+        id: lockfile_fix
+        run: npm audit fix --package-lock-only --no-fund
+
+      - name: Install the exact reconciled lockfile
         id: install
+        if: ${{ always() && steps.lockfile_fix.outcome == 'success' }}
         run: npm ci --no-audit --no-fund
 
       - name: Lint
@@ -47,15 +52,9 @@ jobs:
         if: ${{ always() && steps.install.outcome == 'success' }}
         run: npx tsc --noEmit --project tsconfig.node.json
 
-      - name: Run repository tests when configured
+      - name: Unit tests
         if: ${{ always() && steps.install.outcome == 'success' }}
-        shell: bash
-        run: |
-          if [ "$(node -e "console.log(require('./package.json').scripts?.test ? 'yes' : 'no')")" = "yes" ]; then
-            npm test
-          else
-            echo "::warning::No test script is configured in package.json; automated test coverage remains unverified."
-          fi
+        run: npm test
 
       - name: Audit production dependencies
         if: ${{ always() && steps.install.outcome == 'success' }}
@@ -66,3 +65,12 @@ jobs:
         run: |
           npm run build
           test -s dist/index.html
+
+      - name: Publish reconciled npm lockfile for review
+        if: ${{ always() && hashFiles('package-lock.json') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: signal-guardian-package-lock-${{ github.run_id }}
+          path: package-lock.json
+          if-no-files-found: error
+          retention-days: 7
