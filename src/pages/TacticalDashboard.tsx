@@ -140,6 +140,7 @@ const TacticalDashboard = () => {
             </CardContent>
           </Card>
         ) : (
+          <>
           {/* ─── Threat Level Overview ────────────────────────────── */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
             <ThreatStatCard
@@ -180,6 +181,7 @@ const TacticalDashboard = () => {
               variant="clean"
             />
           </div>
+          </>
         )}
         {/* ─── Avg Score Bar ───────────────────────────────────── */}
         <Card className="bg-card/50 border-border">
