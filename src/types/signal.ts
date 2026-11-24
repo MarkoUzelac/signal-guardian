@@ -11,6 +11,8 @@ export interface CellTower {
   technology: '2G' | '3G' | '4G' | '5G';
   lastSeen: Date;
   isSuspicious: boolean;
+  /** Observed from a trusted radio source; null/undefined means unknown. */
+  encryption?: boolean | null;
   suspiciousReason?: string;
 }
 
