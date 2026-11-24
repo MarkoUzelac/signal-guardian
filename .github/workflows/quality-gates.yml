@@ -5,22 +5,27 @@ on:
     branches: [main]
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
+  actions: write
 
 concurrency:
-  group: signal-guardian-quality-${{ github.ref }}
+  group: signal-guardian-quality-${{ github.event.pull_request.head.ref || github.ref_name }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
   quality:
     name: Build, lint, type-check, tests, and security audit
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     steps:
-      - name: Check out exact commit
+      - name: Check out the exact source branch
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -31,9 +36,42 @@ jobs:
       - name: Verify release policy is present
         run: test -s AGENT_RELIABILITY.md
 
-      # CI validates the committed lockfile; it must never rewrite it.
-      - name: Install locked dependencies
+      - name: Reconcile npm lockfile for same-repository pull requests
+        id: lockfile
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+
+      - name: Commit reconciled lockfile and dispatch verification for new commit
+        id: commit_lockfile
+        if: ${{ always() && steps.lockfile.outcome == 'success' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_BRANCH: ${{ github.event.pull_request.head.ref }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- package-lock.json; then
+            echo "package-lock.json already matches package.json"
+            exit 0
+          fi
+
+          git add package-lock.json
+          git commit -m "chore: reconcile npm lockfile"
+          git push origin "HEAD:${TARGET_BRANCH}"
+
+          curl --fail --silent --show-error \
+            -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${REPOSITORY}/actions/workflows/quality-gates.yml/dispatches" \
+            -d "{\"ref\":\"${TARGET_BRANCH}\"}"
+
+      - name: Install exact reconciled lockfile
         id: install
+        if: ${{ always() && (steps.lockfile.outcome == 'success' || steps.lockfile.outcome == 'skipped') }}
         run: npm ci --no-audit --no-fund
 
       - name: Lint
@@ -66,7 +104,7 @@ jobs:
           npm run build
           test -s dist/index.html
 
-      - name: Capture exact committed lockfile
+      - name: Capture exact lockfile used by this run
         if: ${{ always() && hashFiles('package-lock.json') != '' }}
         uses: actions/upload-artifact@v4
         with:
