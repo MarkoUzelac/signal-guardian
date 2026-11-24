@@ -31,6 +31,7 @@ import { useToast } from '@/hooks/use-toast';
 import { SpeedTestPanel } from '@/components/network/SpeedTestPanel';
 import { getOperatorsByIso } from '@/lib/worldOperators';
 import { z } from 'zod';
+import { calculateMegabitsPerSecond, summarizeLatency } from '@/lib/networkMeasurements.mjs';
 
 // Zod schema for IP API response validation
 const IpApiSchema = z.object({
@@ -352,13 +353,8 @@ const NetworkIntelligencePage = () => {
         throw new Error('Latency measurement failed: no ping request completed successfully.');
       }
 
-      const averageLatency = latencySamples.reduce((sum, sample) => sum + sample, 0) / latencySamples.length;
-      const jitter = latencySamples.length > 1
-        ? Math.sqrt(
-            latencySamples.reduce((sum, sample) => sum + Math.pow(sample - averageLatency, 2), 0) /
-            latencySamples.length
-          )
-        : 0;
+      const { latencyMs, jitterMs } = summarizeLatency(latencySamples);
+      const averageLatency = latencyMs;
 
       setSpeedProgress(35);
       const downloadStart = performance.now();
@@ -371,11 +367,8 @@ const NetworkIntelligencePage = () => {
         throw new Error(`Download endpoint returned HTTP ${downloadResponse.status}.`);
       }
       const downloadData = await downloadResponse.arrayBuffer();
-      const downloadElapsed = (performance.now() - downloadStart) / 1000;
-      if (downloadData.byteLength === 0 || downloadElapsed <= 0) {
-        throw new Error('Download measurement returned no usable data.');
-      }
-      const downloadSpeed = (downloadData.byteLength * 8) / (downloadElapsed * 1000000);
+      const downloadElapsedMilliseconds = performance.now() - downloadStart;
+      const downloadSpeed = calculateMegabitsPerSecond(downloadData.byteLength, downloadElapsedMilliseconds);
 
       setSpeedProgress(65);
       const uploadData = new Uint8Array(500000);
@@ -394,17 +387,14 @@ const NetworkIntelligencePage = () => {
       if (!uploadResponse.ok) {
         throw new Error(`Upload endpoint returned HTTP ${uploadResponse.status}.`);
       }
-      const uploadElapsed = (performance.now() - uploadStart) / 1000;
-      if (uploadElapsed <= 0) {
-        throw new Error('Upload measurement returned an invalid elapsed time.');
-      }
-      const uploadSpeed = (uploadData.byteLength * 8) / (uploadElapsed * 1000000);
+      const uploadElapsedMilliseconds = performance.now() - uploadStart;
+      const uploadSpeed = calculateMegabitsPerSecond(uploadData.byteLength, uploadElapsedMilliseconds);
 
       setSpeedTest({
         download: Math.round(downloadSpeed * 100) / 100,
         upload: Math.round(uploadSpeed * 100) / 100,
         latency: Math.round(averageLatency),
-        jitter: Math.round(jitter * 10) / 10,
+        jitter: Math.round(jitterMs * 10) / 10,
         timestamp: new Date(),
       });
       setSpeedProgress(100);
