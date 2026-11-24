@@ -6,7 +6,7 @@
  */
 
 import type { CellTower } from '@/types/signal';
-import { DEFAULT_COUNTRY, getRandomOperator, type CountryOperators } from './worldOperators';
+import { DEFAULT_COUNTRY, type CountryOperators } from './worldOperators';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -34,7 +34,7 @@ export interface AnomalyReport {
 
 export interface TacticalTower extends CellTower {
   anomalyReport: AnomalyReport;
-  encryption: boolean;
+  encryption: boolean | null;
   broadcastPower: number;
   firstSeen: Date;
   sectorAngle: number;
@@ -88,9 +88,13 @@ function scoreMccMnc(tower: CellTower): { score: number; detail?: string } {
   return { score: 0 };
 }
 
-function scoreEncryption(encryption: boolean): { score: number; detail?: string } {
-  if (!encryption) {
-    return { score: 1.0, detail: 'No encryption detected — open authentication broadcast' };
+function scoreEncryption(encryption: boolean | null): { score: number; detail?: string } {
+  if (encryption === null) {
+    // Unknown is not evidence of missing encryption. Do not infer radio security state.
+    return { score: 0 };
+  }
+  if (encryption === false) {
+    return { score: 1.0, detail: 'The connected telemetry source reports encryption disabled.' };
   }
   return { score: 0 };
 }
@@ -154,7 +158,7 @@ function scoreRapidSwitch(tower: CellTower, allTowers: CellTower[]): { score: nu
 export function analyzeTower(
   tower: CellTower,
   allTowers: CellTower[],
-  encryption: boolean = Math.random() > 0.15
+  encryption: boolean | null = null
 ): AnomalyReport {
   const details: string[] = [];
 
@@ -226,93 +230,6 @@ export const THREAT_BG_CLASSES: Record<ThreatLevel, string> = {
   LOW: 'bg-teal-500/20 border-teal-500/40 text-teal-400',
   CLEAN: 'bg-success/20 border-success/40 text-success',
 };
-
-// ─── Helper: Create Base Towers ──────────────────────────────────────────────
-
-function createBaseTowers(baseLat: number, baseLng: number, count: number, country: CountryOperators = DEFAULT_COUNTRY): CellTower[] {
-  return Array.from({ length: count }, (_, i) => {
-    const op = getRandomOperator(country);
-    const isSuspicious = Math.random() > 0.85;
-    return {
-      id: `tower-${i}-${Date.now()}`,
-      mcc: op.mcc,
-      mnc: op.mnc,
-      lac: Math.floor(Math.random() * 65535).toString(),
-      cellId: Math.floor(Math.random() * 65535).toString(),
-      lat: baseLat + (Math.random() - 0.5) * 0.09,
-      lng: baseLng + (Math.random() - 0.5) * 0.09,
-      signalStrength: -50 - Math.floor(Math.random() * 60),
-      operator: op.name,
-      technology: (['2G', '3G', '4G', '5G'] as const)[Math.floor(Math.random() * 4)],
-      lastSeen: new Date(Date.now() - Math.random() * 3600000),
-      isSuspicious,
-      suspiciousReason: isSuspicious ? 'Unknown Cell ID' : undefined,
-    };
-  });
-}
-
-// ─── Tactical Tower Generation ───────────────────────────────────────────────
-
-export function generateTacticalTowers(
-  baseLat: number,
-  baseLng: number,
-  count: number = 50,
-  generateBaseTowers?: (lat: number, lng: number, count: number) => CellTower[],
-  country: CountryOperators = DEFAULT_COUNTRY
-): TacticalTower[] {
-  // Keep anomaly detection aligned with the user's current country.
-  setKnownCountry(country);
-
-  // Use provided generator or create simple towers inline
-  const baseTowers: CellTower[] = generateBaseTowers
-    ? generateBaseTowers(baseLat, baseLng, count)
-    : createBaseTowers(baseLat, baseLng, count, country);
-
-  // Inject some deliberately suspicious towers
-  const tacticalTowers: TacticalTower[] = baseTowers.map((tower, i) => {
-    // Make ~20% intentionally suspicious for demo
-    const forceRogue = i < count * 0.2;
-    
-    const modifiedTower = { ...tower };
-    if (forceRogue) {
-      const rogueType = i % 4;
-      switch (rogueType) {
-        case 0: // Unknown MCC
-          modifiedTower.mcc = '999';
-          modifiedTower.mnc = '99';
-          modifiedTower.signalStrength = -25;
-          break;
-        case 1: // Strong 2G (downgrade)
-          modifiedTower.technology = '2G';
-          modifiedTower.signalStrength = -35;
-          break;
-        case 2: // Power spike
-          modifiedTower.signalStrength = -20;
-          break;
-        case 3: // Duplicate cell ID
-          modifiedTower.cellId = baseTowers[0].cellId;
-          break;
-      }
-    }
-
-    const encryption = forceRogue ? (i % 3 === 0 ? false : true) : Math.random() > 0.1;
-    const anomalyReport = analyzeTower(modifiedTower, baseTowers, encryption);
-
-    return {
-      ...modifiedTower,
-      isSuspicious: anomalyReport.score > 0.4,
-      suspiciousReason: anomalyReport.details[0],
-      anomalyReport,
-      encryption,
-      broadcastPower: forceRogue ? 40 + Math.random() * 20 : 10 + Math.random() * 25,
-      firstSeen: new Date(Date.now() - Math.random() * 86400000 * 30),
-      sectorAngle: Math.floor(Math.random() * 360),
-      sectorSpan: 60 + Math.floor(Math.random() * 60),
-    };
-  });
-
-  return tacticalTowers;
-}
 
 // ─── Aggregate Stats ─────────────────────────────────────────────────────────
 
