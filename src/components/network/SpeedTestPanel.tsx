@@ -44,8 +44,9 @@ export const SpeedTestPanel = ({ hasConsent }: { hasConsent: boolean }) => {
           signal,
         });
         pings.push(performance.now() - start);
-      } catch {
-        // Skip failed pings
+      } catch (error) {
+        if (signal.aborted) throw error;
+        // Ignore an individual failed ping; require at least one successful sample.
       }
     }
     if (pings.length === 0) {
@@ -90,8 +91,9 @@ export const SpeedTestPanel = ({ hasConsent }: { hasConsent: boolean }) => {
         const elapsed = (performance.now() - start) / 1000;
         const speed = (received * 8) / (elapsed * 1000000); // Mbps
         speeds.push(speed);
-      } catch {
-        // Try next endpoint
+      } catch (error) {
+        if (signal.aborted) throw error;
+        // Try the next test endpoint when the current one is unavailable.
       }
     }
 
@@ -104,25 +106,25 @@ export const SpeedTestPanel = ({ hasConsent }: { hasConsent: boolean }) => {
   }, []);
 
   const measureUpload = useCallback(async (signal: AbortSignal): Promise<number> => {
-    try {
-      const data = new Uint8Array(1000000); // 1MB
-      crypto.getRandomValues(data);
-      
-      const start = performance.now();
-      const response = await fetch(UPLOAD_ENDPOINT, {
-        method: 'POST',
-        body: data,
-        signal,
-        mode: 'cors',
-      });
-      if (!response.ok) {
-        throw new Error(`Upload test endpoint failed with HTTP ${response.status}.`);
-      }
-      const elapsed = (performance.now() - start) / 1000;
-      if (elapsed <= 0) {
-        throw new Error('Upload measurement returned an invalid elapsed time.');
-      }
-      return (data.length * 8) / (elapsed * 1000000);
+    const data = new Uint8Array(1000000); // 1MB
+    crypto.getRandomValues(data);
+
+    const start = performance.now();
+    const response = await fetch(UPLOAD_ENDPOINT, {
+      method: 'POST',
+      body: data,
+      signal,
+      mode: 'cors',
+    });
+    if (!response.ok) {
+      throw new Error(`Upload test endpoint failed with HTTP ${response.status}.`);
+    }
+
+    const elapsed = (performance.now() - start) / 1000;
+    if (elapsed <= 0) {
+      throw new Error('Upload measurement returned an invalid elapsed time.');
+    }
+    return (data.length * 8) / (elapsed * 1000000);
   }, []);
 
   const runTest = useCallback(async () => {
@@ -169,6 +171,7 @@ export const SpeedTestPanel = ({ hasConsent }: { hasConsent: boolean }) => {
       toast({ title: "Speed test complete", description: `↓${download.toFixed(1)} ↑${upload.toFixed(1)} Mbps` });
     } catch (e) {
       if (e instanceof Error && e.name === 'AbortError') {
+        setPhase('idle');
         toast({ title: "Test cancelled", variant: "destructive" });
       } else {
         toast({
