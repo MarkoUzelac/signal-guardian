@@ -9,9 +9,10 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 interface TriangulationFormProps {
   onSubmit: (data: { mcc: string; mnc: string; lac: string; cellId: string }) => void;
   isLoading?: boolean;
+  available?: boolean;
 }
 
-export const TriangulationForm = ({ onSubmit, isLoading }: TriangulationFormProps) => {
+export const TriangulationForm = ({ onSubmit, isLoading, available = false }: TriangulationFormProps) => {
   const [formData, setFormData] = useState({
     mcc: '',
     mnc: '',
@@ -38,7 +39,7 @@ export const TriangulationForm = ({ onSubmit, isLoading }: TriangulationFormProp
           Cell Tower Triangulation
         </CardTitle>
         <CardDescription>
-          Enter cell tower identifiers to estimate location using OpenCellID database.
+          Enter cell identifiers for a provider-backed lookup. No cell-tower lookup provider is currently configured.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -89,7 +90,7 @@ export const TriangulationForm = ({ onSubmit, isLoading }: TriangulationFormProp
             </div>
           </div>
 
-          <Button type="submit" className="w-full" disabled={isLoading}>
+          <Button type="submit" className="w-full" disabled={isLoading || !available}>
             {isLoading ? (
               <motion.div
                 animate={{ rotate: 360 }}
@@ -99,7 +100,7 @@ export const TriangulationForm = ({ onSubmit, isLoading }: TriangulationFormProp
             ) : (
               <>
                 <Search className="w-4 h-4 mr-2" />
-                Lookup Location
+                Lookup Unavailable
               </>
             )}
           </Button>
@@ -111,9 +112,7 @@ export const TriangulationForm = ({ onSubmit, isLoading }: TriangulationFormProp
             <div className="text-xs text-muted-foreground">
               <p className="font-medium mb-1">About Cell Tower Lookup</p>
               <p>
-                This uses the OpenCellID database to estimate tower locations. 
-                Accuracy varies by region. You can obtain cell info from your 
-                device's engineering mode or captured GSM data.
+                OpenCellID is not connected to this application. Submitting these identifiers cannot return a position until an authenticated provider integration is configured. No coordinates are estimated from the form values.
               </p>
             </div>
           </div>
