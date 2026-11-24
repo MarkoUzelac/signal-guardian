@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Download, Filter, Search, Trash2 } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -15,36 +15,12 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Alert } from '@/types/signal';
-import { generateMockAlerts, simulateRealtimeAlert } from '@/lib/mockData';
 import { toast } from 'sonner';
 
 const AlertsPage = () => {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [filter, setFilter] = useState<'all' | 'critical' | 'warning' | 'info'>('all');
   const [searchQuery, setSearchQuery] = useState('');
-
-  useEffect(() => {
-    // Load more alerts for the logs page
-    const initialAlerts = [
-      ...generateMockAlerts(),
-      ...generateMockAlerts().map((a, i) => ({
-        ...a,
-        id: `${a.id}-${i}`,
-        timestamp: new Date(Date.now() - (i + 4) * 900000),
-      })),
-    ];
-    setAlerts(initialAlerts);
-
-    // Subscribe to real-time alerts
-    const unsub = simulateRealtimeAlert((alert) => {
-      setAlerts(prev => [alert, ...prev]);
-      toast.warning(alert.title, {
-        description: alert.message,
-      });
-    });
-
-    return unsub;
-  }, []);
 
   const handleAcknowledge = (id: string) => {
     setAlerts(prev =>
@@ -57,6 +33,10 @@ const AlertsPage = () => {
   };
 
   const handleExport = () => {
+    if (alerts.length === 0) {
+      toast.info('No verified alert events are available to export.');
+      return;
+    }
     const data = JSON.stringify(alerts, null, 2);
     const blob = new Blob([data], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -69,6 +49,10 @@ const AlertsPage = () => {
   };
 
   const handleClearAcknowledged = () => {
+    if (!alerts.some(a => a.acknowledged)) {
+      toast.info('There are no acknowledged alerts to clear.');
+      return;
+    }
     setAlerts(prev => prev.filter(a => !a.acknowledged));
     toast.success('Cleared acknowledged alerts');
   };
@@ -94,10 +78,18 @@ const AlertsPage = () => {
     <MainLayout>
       <Header
         title="Alerts & Logs"
-        subtitle="Security alerts, warnings, and system event history"
+        subtitle="Verified alert events from connected telemetry sources"
       />
 
       <div className="p-6 space-y-6">
+        <Card className="border-warning/40 bg-warning/5">
+          <CardContent className="p-4 text-sm">
+            <p className="font-semibold">Alert feed not connected</p>
+            <p className="mt-1 text-muted-foreground">
+              No device or backend event source is configured. The empty event list is not evidence that the environment is safe or free of threats.
+            </p>
+          </CardContent>
+        </Card>
         {/* Stats */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
           <Card className="bg-card border-border">
@@ -164,11 +156,11 @@ const AlertsPage = () => {
               </div>
 
               <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={handleClearAcknowledged}>
+                <Button variant="outline" size="sm" onClick={handleClearAcknowledged} disabled={!alerts.some(a => a.acknowledged)}>
                   <Trash2 className="w-4 h-4 mr-2" />
                   Clear Read
                 </Button>
-                <Button variant="outline" size="sm" onClick={handleExport}>
+                <Button variant="outline" size="sm" onClick={handleExport} disabled={alerts.length === 0}>
                   <Download className="w-4 h-4 mr-2" />
                   Export
                 </Button>
