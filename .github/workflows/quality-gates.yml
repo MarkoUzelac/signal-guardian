@@ -1,0 +1,47 @@
+name: Quality Gates
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: signal-guardian-quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Build, lint, and type-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out exact commit
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Verify release policy is present
+        run: test -s AGENT_RELIABILITY.md
+
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type-check application
+        run: npx tsc --noEmit --project tsconfig.app.json
+
+      - name: Type-check Vite configuration
+        run: npx tsc --noEmit --project tsconfig.node.json
+
+      - name: Build production bundle
+        run: npm run build
