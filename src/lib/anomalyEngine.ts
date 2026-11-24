@@ -273,7 +273,7 @@ export function generateTacticalTowers(
     // Make ~20% intentionally suspicious for demo
     const forceRogue = i < count * 0.2;
     
-    let modifiedTower = { ...tower };
+    const modifiedTower = { ...tower };
     if (forceRogue) {
       const rogueType = i % 4;
       switch (rogueType) {
